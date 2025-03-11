@@ -5,6 +5,7 @@
 #include <stdbool.h>
 #include <stdlib.h>
 #include <stdio.h>
+#include "queue.h"
 
 // Constants
 #define MAX_PRODUCTS 50
@@ -29,23 +30,30 @@ typedef struct {
     bool is_done;
 } client_t;
 
-// Forward declarations for queue structures
-typedef struct client_queue client_queue_t;
-typedef struct task_queue task_queue_t;
-typedef struct assistant_task assistant_task_t;
+// Assistant task structure
+typedef struct {
+    int product_id;
+    int clerk_id;
+    bool is_complete;
+    pthread_mutex_t mutex;
+    pthread_cond_t completed;
+} assistant_task_t;
 
-// Function declarations for clerk and assistant threads
+// Queues for clients and assistant tasks
+extern queue_t client_queue;
+extern queue_t task_queue;
+
+// Function declarations
 void* clerk_thread(void* arg);
 void* assistant_thread(void* arg);
 
-// Global variables declaration (defined in main.c)
+// Product-related functions
 extern product_t products[MAX_PRODUCTS];
 extern pthread_mutex_t inventory_mutex;
 extern int num_products;
 
-// Product functions
 void initialize_products();
-bool product_in_stock(int product_id);
-bool product_needs_assistant(int product_id);
+bool try_get_product(int product_id);
+assistant_task_t* create_assistant_task(int product_id, int clerk_id);
 
 #endif // SHOP_H
