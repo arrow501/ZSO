@@ -1,54 +1,214 @@
+/* main.c - Simulation control */
 #include <stdio.h>
-#include <stdbool.h>
-#include <pthread.h>
-
+#include <stdlib.h>
+#include <string.h>
+#include <unistd.h>
+#include <time.h>
 #include "shop.h"
-#include "queue.h"
+#include "product.h"
+#include "clerk.h"
+#include "assistant.h"
+#include "customer.h"
+#include <linux/time.h>
 
-// Global queue definitions
-client_queue_t client_queue;
-task_queue_t task_queue;
+/* Shop instance */
+static shop_t shop;
 
-// Function to run the shop simulation
-void projekt_zso() {
-    // Initialize resources
-    initialize_products();
-    
-    // Initialize queues
-    client_queue_init(&client_queue, MAX_CLIENTS);
-    task_queue_init(&task_queue, MAX_CLIENTS * 2);
-    
-    // Initialize mutex
-    pthread_mutex_init(&inventory_mutex, NULL);
-    
-    // Create clients
-    // (Create client data structures and add to queue)
-    
-    // Create threads
-    pthread_t clerk_threads[NUM_CLERKS];
-    pthread_t assistant_thread_id;
-    
-    // Start threads
-    for (int i = 0; i < NUM_CLERKS; i++) {
-        pthread_create(&clerk_threads[i], NULL, clerk_thread, (void*)(intptr_t)i);
-    }
-    pthread_create(&assistant_thread_id, NULL, assistant_thread, NULL);
-    
-    // Join threads
-    for (int i = 0; i < NUM_CLERKS; i++) {
-        pthread_join(clerk_threads[i], NULL);
-    }
-    pthread_join(assistant_thread_id, NULL);
-    
-    // Cleanup
-    client_queue_cleanup(&client_queue);
-    task_queue_cleanup(&task_queue);
-    pthread_mutex_destroy(&inventory_mutex);
-}
+/* Customer threads */
+#define NUM_CUSTOMERS 20
+static customer_t customers[NUM_CUSTOMERS];
 
-int main() {
-    for (int i = 0; i < 10; i++) {
-        projekt_zso();
+/* Helper structure for thread arguments */
+typedef struct {
+    union {
+        clerk_t* clerk;
+        assistant_t* assistant;
+        customer_t* customer;
+    };
+    shop_t* shop;
+} thread_arg_t;
+
+/* Initialize simulation */
+static int init_simulation(void) {
+    int i;
+    
+    /* Seed random number generator */
+    srand(time(NULL));
+    
+    /* Initialize shop state */
+    memset(&shop, 0, sizeof(shop));
+    pthread_mutex_init(&shop.mutex, NULL);
+    pthread_cond_init(&shop.shutdown_complete, NULL);
+    
+    /* Initialize product system */
+    product_system_init();
+    
+    /* Initialize clerk threads */
+    for (i = 0; i < NUM_CLERKS; i++) {
+        if (clerk_init(&shop.clerks[i], i) != 0) {
+            fprintf(stderr, "Failed to initialize clerk %d\n", i);
+            return -1;
+        }
     }
+    
+    /* Initialize assistant thread */
+    if (assistant_init(&shop.assistant) != 0) {
+        fprintf(stderr, "Failed to initialize assistant\n");
+        return -1;
+    }
+    
+    /* Initialize customer threads */
+    for (i = 0; i < NUM_CUSTOMERS; i++) {
+        if (customer_init(&customers[i], i) != 0) {
+            fprintf(stderr, "Failed to initialize customer %d\n", i);
+            return -1;
+        }
+        
+        /* Generate random shopping list */
+        customer_generate_shopping_list(&customers[i], 3, 8);
+    }
+    
     return 0;
 }
+
+/* Start simulation threads */
+static int start_threads(void) {
+    int i;
+    
+    /* Start clerk threads */
+    for (i = 0; i < NUM_CLERKS; i++) {
+        if (clerk_start(&shop.clerks[i], &shop) != 0) {
+            fprintf(stderr, "Failed to start clerk %d\n", i);
+            return -1;
+        }
+    }
+    
+    /* Start assistant thread */
+    if (assistant_start(&shop.assistant, &shop) != 0) {
+        fprintf(stderr, "Failed to start assistant\n");
+        return -1;
+    }
+    
+    /* Start customer threads */
+    for (i = 0; i < NUM_CUSTOMERS; i++) {
+        if (customer_start(&customers[i], &shop) != 0) {
+            fprintf(stderr, "Failed to start customer %d\n", i);
+            return -1;
+        }
+    }
+    
+    return 0;
+}
+
+/* Wait for customers to finish */
+static void wait_for_customers(void) {
+    int i;
+    
+    /* Join all customer threads */
+    for (i = 0; i < NUM_CUSTOMERS; i++) {
+        pthread_join(customers[i].thread, NULL);
+    }
+}
+
+/* Stop and cleanup simulation */
+static void cleanup_simulation(void) {
+    int i;
+    
+    /* Set shutdown flag */
+    pthread_mutex_lock(&shop.mutex);
+    shop.shutdown = true;
+    pthread_mutex_unlock(&shop.mutex);
+    
+    /* Stop clerk threads */
+    for (i = 0; i < NUM_CLERKS; i++) {
+        clerk_stop(&shop.clerks[i]);
+        clerk_cleanup(&shop.clerks[i]);
+    }
+    
+    /* Stop assistant thread */
+    assistant_stop(&shop.assistant);
+    assistant_cleanup(&shop.assistant);
+    
+    /* Cleanup customer resources */
+    for (i = 0; i < NUM_CUSTOMERS; i++) {
+        customer_cleanup(&customers[i]);
+    }
+    
+    /* Cleanup shop resources */
+    pthread_mutex_destroy(&shop.mutex);
+    pthread_cond_destroy(&shop.shutdown_complete);
+    
+    /* Cleanup product system */
+    product_system_cleanup();
+}
+
+/* Print simulation results */
+static void print_results(void) {
+    int i;
+    int total_items = 0;
+    int total_sales = 0;
+    
+    printf("\n==== Simulation Results ====\n");
+    printf("Customers processed: %d\n", shop.customers_processed);
+    
+    for (i = 0; i < NUM_CLERKS; i++) {
+        total_items += shop.clerks[i].items_processed;
+        total_sales += shop.clerks[i].total_sales;
+        
+        printf("Clerk %d: processed %d items, total sales: $%d.%02d\n",
+               i, shop.clerks[i].items_processed,
+               shop.clerks[i].total_sales / 100, shop.clerks[i].total_sales % 100);
+    }
+    
+    printf("Total items sold: %d\n", total_items);
+    printf("Total sales: $%d.%02d\n", total_sales / 100, total_sales % 100);
+    printf("============================\n");
+}
+
+/* Main simulation function */
+int projekt_zso(void) {
+    /* Initialize simulation */
+    if (init_simulation() != 0) {
+        fprintf(stderr, "Failed to initialize simulation\n");
+        cleanup_simulation();
+        return -1;
+    }
+    
+    /* Start simulation threads */
+    if (start_threads() != 0) {
+        fprintf(stderr, "Failed to start simulation threads\n");
+        cleanup_simulation();
+        return -1;
+    }
+    
+    /* Wait for customers to finish (with timeout) */
+    struct timespec timeout;
+    clock_gettime(CLOCK_REALTIME, &timeout);
+    timeout.tv_sec += SIMULATION_TIME_SEC;
+    
+    /* Run for specified time */
+    sleep(SIMULATION_TIME_SEC);
+    
+    /* Clean up and print results */
+    cleanup_simulation();
+    print_results();
+    
+    return 0;
+}
+
+/* Test main function */
+#ifdef TEST_MAIN
+int main(void) {
+    int i;
+    
+    printf("Starting shop simulation...\n");
+    
+    /* Run simulation multiple times */
+    for (i = 0; i < 10; i++) {
+        printf("\n=== Run %d ===\n", i + 1);
+        projekt_zso();
+    }
+    
+    return 0;
+}
+#endif

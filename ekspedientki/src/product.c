@@ -1,21 +1,46 @@
-#include "shop.h"
+/* product.c - Product management for shop simulation */
+#include <stdio.h>
+#include <string.h>
+#include "product.h"
 
+/* Macro for initializing products */
 #define INIT_PRODUCT(pid, pname, pprice, pstock, passist) \
-    do                                                \
-    {                                                 \
-        products[pid].id = pid;                       \
-        strcpy(products[pid].name, pname);            \
-        products[pid].price = pprice;                 \
-        products[pid].stock = pstock;                 \
-        products[pid].needs_assistant = passist;      \
-    } while (0)
+do { \
+    products[pid].id = pid; \
+    strcpy(products[pid].name, pname); \
+    products[pid].price = pprice; \
+    products[pid].stock = pstock; \
+    products[pid].needs_assistant = passist; \
+} while (0)
 
-// Global product array definition
+/* Global product array definition */
 product_t products[MAX_PRODUCTS];
-int num_products = 0;
 pthread_mutex_t inventory_mutex;
 
-void initialize_products(){
+void product_system_init(void) {
+    /* Initialize the inventory mutex */
+    pthread_mutex_init(&inventory_mutex, NULL);
+    
+    /* Setup the product inventory */
+    initialize_products();
+    
+    /* For debug purposes */
+    #ifdef DEBUG
+    printf("Product system initialized with %d products\n", MAX_PRODUCTS);
+    #endif
+}
+
+void product_system_cleanup(void) {
+    /* Destroy the inventory mutex */
+    pthread_mutex_destroy(&inventory_mutex);
+    
+    #ifdef DEBUG
+    printf("Product system cleaned up\n");
+    #endif
+}
+
+void initialize_products(void) {
+    /* Initialize all products */
     INIT_PRODUCT(0, "Banana", 129, 45, false);
     INIT_PRODUCT(1, "Apple", 159, 50, false);
     INIT_PRODUCT(2, "Bread", 349, 32, false);
@@ -66,22 +91,78 @@ void initialize_products(){
     INIT_PRODUCT(47, "Fresh Meat", 1099, 15, true);
     INIT_PRODUCT(48, "Salad Mix", 349, 30, true);
     INIT_PRODUCT(49, "Fresh Juice", 899, 25, true);
+    
+    #ifdef DEBUG
+    printf("Products initialized\n");
+    #endif
 }
 
 bool try_get_product(int product_id) {
+    bool success = false;
+    
+    /* Ensure thread-safe access to inventory */
     pthread_mutex_lock(&inventory_mutex);
     
-    bool success = false;
-    if (product_id < MAX_PRODUCTS && products[product_id].stock > 0) {
+    /* Check if product is valid and in stock */
+    if (product_id >= 0 && product_id < MAX_PRODUCTS && products[product_id].stock > 0) {
+        /* Decrement stock */
         products[product_id].stock--;
         success = true;
+        
+        #ifdef DEBUG
+        printf("Product %d (%s) taken from inventory, %d remaining\n", 
+               product_id, products[product_id].name, products[product_id].stock);
+        #endif
+    } else {
+        #ifdef DEBUG
+        if (product_id >= 0 && product_id < MAX_PRODUCTS) {
+            printf("Product %d (%s) out of stock\n", product_id, products[product_id].name);
+        } else {
+            printf("Invalid product ID: %d\n", product_id);
+        }
+        #endif
     }
     
     pthread_mutex_unlock(&inventory_mutex);
     return success;
 }
 
-bool product_needs_assistant(int product_id)
-{
-    return products[product_id].needs_assistant;
+void return_product(int product_id) {
+    /* Ensure thread-safe access to inventory */
+    pthread_mutex_lock(&inventory_mutex);
+    
+    /* Check if product is valid */
+    if (product_id >= 0 && product_id < MAX_PRODUCTS) {
+        /* Increment stock */
+        products[product_id].stock++;
+        
+        #ifdef DEBUG
+        printf("Product %d (%s) returned to inventory, now %d in stock\n", 
+               product_id, products[product_id].name, products[product_id].stock);
+        #endif
+    } else {
+        #ifdef DEBUG
+        printf("Invalid product ID for return: %d\n", product_id);
+        #endif
+    }
+    
+    pthread_mutex_unlock(&inventory_mutex);
+}
+
+bool product_needs_assistant(int product_id) {
+    if (product_id >= 0 && product_id < MAX_PRODUCTS) {
+        return products[product_id].needs_assistant;
+    }
+    return false;
+}
+
+const product_t* get_product_info(int product_id) {
+    if (product_id >= 0 && product_id < MAX_PRODUCTS) {
+        return &products[product_id];
+    }
+    return NULL;
+}
+
+int get_product_count(void) {
+    return MAX_PRODUCTS;
 }
