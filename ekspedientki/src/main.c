@@ -11,6 +11,8 @@
 #include "customer.h"
 #include <linux/time.h>
 
+/* Constants */
+
 /* Shop instance */
 static shop_t shop;
 
