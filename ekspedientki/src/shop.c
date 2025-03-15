@@ -1,17 +1,17 @@
-typedef struct customer
-{
-    struct customer* myself;
-    int* shopping_list;
-    int wallet;
-};
+// typedef struct customer
+// {
+//     struct customer* myself;
+//     int* shopping_list;
+//     int wallet;
+// };
 
-typedef struct clerk
-{
+// typedef struct clerk
+// {
     
-};
+// };
 
-queue_t customer_queue;
+// queue* customer_queue;
 
-void* client_thread(void* arg){
+// void* client_thread(void* arg){
     
-}
+// }
