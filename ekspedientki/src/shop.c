@@ -211,7 +211,7 @@ unsigned int get_pseudo_random(unsigned int seed, int min, int max) {
     return min + (next % (max - min + 1));
 }
 
-int main() {
+int zso() {
     pthread_t customers[NUM_CUSTOMERS];
     pthread_t clerks[NUM_CLERKS];
 
