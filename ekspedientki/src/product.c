@@ -1,7 +1,6 @@
 #include "product.h"
 
-/* Parameters */
-#define MAX_PRODUCTS 50
+
 
 /* Global Variables*/
 product_t products[MAX_PRODUCTS];

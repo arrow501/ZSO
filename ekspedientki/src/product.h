@@ -1,6 +1,9 @@
 #ifndef PRODUCT_H
 #define PRODUCT_H
 
+/* Parameters */
+#define MAX_PRODUCTS 50
+
 #include <stdbool.h>  
 #include <string.h>   
 #include <pthread.h>  

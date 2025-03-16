@@ -7,7 +7,7 @@
 #include <pthread.h>
 #include <unistd.h>
 
-#define NUM_CUSTOMERS 1
+#define NUM_CUSTOMERS 10
 #define NUM_CLERKS 1
 
 
@@ -24,7 +24,6 @@ typedef struct transaction_t{
     int paid;
     int* items;
     int items_size;
-    clerk_t* clerk;
 } transaction_t;
 
 
@@ -59,7 +58,10 @@ void* customer_thread(void* arg){
 
     // wait for the clerk to serve me
     pthread_mutex_lock(&self->mutex);
-    pthread_cond_wait(&self->cond, &self->mutex);
+    
+    while (self->reciecpt == NULL) {
+        pthread_cond_wait(&self->cond, &self->mutex);
+    }
     // check the reciept
     self->wallet -= self->reciecpt->total;
     self->reciecpt->paid = self->reciecpt->total;
@@ -71,7 +73,6 @@ void* customer_thread(void* arg){
 
     // leave the shop
     printf("Customer %d has left the shop\n", self->id);
-
 
     // Clean up my properties
     free(self->reciecpt->items);
@@ -88,78 +89,93 @@ void* clerk_thread(void* arg){
     clerk_t* self = (clerk_t*)arg;
     printf("Clerk %d has entered the shop\n", self->id);
 
-    // pop customer from queue; this is blocking
-    customer_t* c = (customer_t*)queue_pop(customer_queue);
-    printf("Clerk is serving customer %d\n", c->id);
-    
-    
-    
-    // create an array for the reciept
-    int* reciept = (int*)malloc(sizeof(int)*c->shopping_list_size);
-    if(reciept == NULL){
-        fprintf(stderr, "Error: malloc failed\n");
-        exit(1);
-    }
-    
-    // ring up the customer
-    int total = 0, item_count = 0;
-
-    printf("Clerk %d\n is ringing up customer %d\n",self->id, c->id);
-    for(int i = 0; i < c->shopping_list_size; i++){
-        int product_id = c->shopping_list[i];
+    for(int i = 0; i < NUM_CUSTOMERS; i++){
+        // pop customer from queue; this is blocking
+        customer_t* c = (customer_t*)queue_pop(customer_queue);
+        printf("Clerk is serving customer %d\n", c->id);
         
-        bool in_stock = try_get_product(product_id); 
-        if(in_stock){
-            total += get_product_price(product_id);
-            reciept[item_count++] = product_id;
+        
+        
+        // allocate maximum space for the purchased items
+        int* purchaed_items = (int*)malloc(sizeof(int)*c->shopping_list_size);
+        if(purchaed_items == NULL){
+            fprintf(stderr, "Error: malloc failed\n");
+            exit(1);
         }
+        
+        // ring up the customer
+        int total = 0, item_count = 0;
+
+        printf("Clerk %d\n is ringing up customer %d\n",self->id, c->id);
+        for(int i = 0; i < c->shopping_list_size; i++){
+            int product_id = c->shopping_list[i];
+            
+            bool in_stock = try_get_product(product_id); 
+            if(in_stock){
+                total += get_product_price(product_id);
+                purchaed_items[item_count++] = product_id;
+            }
+        }
+        
+
+
+        // create a transaction
+        transaction_t* t = (transaction_t*)malloc(sizeof(transaction_t));
+        if(t == NULL){
+            fprintf(stderr, "Error: malloc failed\n");
+            exit(1);
+        }
+        t->paid = 0;
+        t->total = total;
+        t->items = malloc(sizeof(int)*item_count);
+        t->items_size = item_count;
+
+        if(t->items == NULL){
+            fprintf(stderr, "Error: malloc failed\n");
+            exit(1);
+        }
+        // copy the 
+        for(int i = 0; i < item_count; i++){
+            t->items[i] = purchaed_items[i];
+        }
+        free(purchaed_items);
+
+        pthread_mutex_lock(&c->mutex); // lock the customer
+        c->reciecpt = t; // give the reciept to the customer
+        int customer_wallet = c->wallet;
+
+        // signal the customer to pay    
+        pthread_cond_signal(&c->cond); // signal the customer, does itunlock the customer?
+        
+        printf("Clerk is waiting for customer %d to pay\n", c->id);
+        
+        // wait for the customer to pay
+        while(t->paid < t->total){
+            pthread_cond_wait(&c->cond, &c->mutex);
+        }
+        printf("total: %d\n", total);
+        printf("reciept total: %d\n", t->total);
+        printf("paid: %d\n", t->paid);
+        printf("customer_wallet: %d\n", customer_wallet);
+        printf("expected wallet: %d\n", customer_wallet - total);
+        printf("actual wallet: %d\n", c->wallet);
+
+        assert(customer_wallet - total == c->wallet); // check if the customer paid the correct amount
+        // consider implementing change
+
+        // update the cash register
+        self->cash_register += t->paid;
+        
+        
+        printf("Clerk has been paid by customer %d\n", c->id);
+
+        pthread_mutex_unlock(&c->mutex); // unlock the customer
+
+        //Q: should i free the reciept here?
+        //A: no, the customer will free it
+
+        // clerk is ready to serve next customer
     }
-    // trim the reciept
-    reciept = realloc(reciept, sizeof(int)*item_count);
-    if(reciept == NULL){
-        fprintf(stderr, "Error: realloc failed\n");
-        exit(1);
-    }
-    // create a transaction
-    transaction_t* t = (transaction_t*)malloc(sizeof(transaction_t));
-    if(t == NULL){
-        fprintf(stderr, "Error: malloc failed\n");
-        exit(1);
-    }
-    t->total = total;
-    t->items = reciept;
-    t->items_size = item_count;
-    t->clerk = self;
-
-    pthread_mutex_lock(&c->mutex); // lock the customer
-    c->reciecpt = t; // give the reciept to the customer
-    int customer_wallet = c->wallet;
-
-    // signal the customer to pay    
-    pthread_cond_signal(&c->cond); // signal the customer, does itunlock the customer?
-    
-    printf("Clerk is waiting for customer %d to pay\n", c->id);
-    
-    // wait for the customer to pay
-    while(t->paid < t->total){
-        pthread_cond_wait(&c->cond, &c->mutex);
-    }
-    assert(customer_wallet - total == c->wallet); // check if the customer paid the correct amount
-    // consider implementing change
-
-    // update the cash register
-    self->cash_register += t->paid;
-    
-    
-    printf("Clerk has been paid by customer %d\n", c->id);
-
-    pthread_mutex_unlock(&c->mutex); // unlock the customer
-
-    //Q: should i free the reciept here?
-    //A: no, the customer will free it
-
-    // clerk is ready to serve next customer
-    
     return NULL;
 }
 
@@ -172,6 +188,8 @@ int main(){
 
     // create customers
     for(int i = 0; i < NUM_CUSTOMERS; i++){
+               
+        
         customer_t* c = (customer_t*)malloc(sizeof(customer_t)); // customer must remember to free itself
         if(c == NULL){
             fprintf(stderr, "Error: malloc failed\n");
@@ -181,14 +199,22 @@ int main(){
         c->myself = c;
         c->id = i;
         c->wallet = 100; 
-        c->shopping_list = (int*)malloc(sizeof(int)*10);
-        c->shopping_list_size = 10;
         c->reciecpt = NULL;
+
+        // procedurally generate the shopping list
+        c->shopping_list_size = i%10 + 2;
+        c->shopping_list = (int*)malloc(sizeof(int)*c->shopping_list_size);
 
         if(c->shopping_list == NULL){
             fprintf(stderr, "Error: malloc failed\n");
             exit(1);
         }
+        int pseduo_random = 1;
+        for(int j = 0; j < c->shopping_list_size; j++){
+            pseduo_random = (pseduo_random * (i+1) * (j+1))%MAX_PRODUCTS;
+            c->shopping_list[j] = j;
+        }
+        
 
         pthread_cond_init(&c->cond, NULL);
         pthread_mutex_init(&c->mutex, NULL);
