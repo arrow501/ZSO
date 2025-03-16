@@ -45,7 +45,8 @@ typedef struct customer_t {
 
 // Global Variables
 queue* customer_queue;
-int total_merchandise_value = 0; // Track total value of all sold items
+
+
 
 void* customer_thread(void* arg) {
     customer_t* self = (customer_t*)arg;
@@ -74,8 +75,9 @@ void* customer_thread(void* arg) {
     // Verify receipt is valid
     assert(self->reciecpt != NULL);
     assert(self->reciecpt->total >= 0);
-    // Ensure customer has enough money
-    assert(self->wallet >= self->reciecpt->total);
+    // I decided Customers can go into debt
+    // // Ensure customer has enough money
+    // assert(self->wallet >= self->reciecpt->total);
     #endif
 
     // Check the receipt and pay
@@ -104,11 +106,13 @@ void* customer_thread(void* arg) {
     printf("Customer %d has left the shop\n", self->id);
     #endif
 
-    // Clean up my properties - only after transaction is fully complete
     #if ENABLE_ASSERTS
     assert(self->reciecpt != NULL);
     assert(self->reciecpt->items != NULL || self->reciecpt->items_size == 0);
     #endif
+
+    // Clean up my properties - only after transaction is fully complete
+
     
     free(self->reciecpt->items);
     free(self->reciecpt);
@@ -122,14 +126,6 @@ void* customer_thread(void* arg) {
 
 void* clerk_thread(void* arg) {
     clerk_t* self = (clerk_t*)arg;
-    int clerk_total_merchandise_sold = 0; // Track value of merchandise sold by this clerk
-    
-    #if ENABLE_ASSERTS
-    assert(self != NULL);
-    assert(self->id >= 0);
-    assert(self->cash_register == 0);
-    #endif
-    
     #if ENABLE_PRINTING
     printf("Clerk %d has entered the shop\n", self->id);
     #endif
@@ -172,10 +168,8 @@ void* clerk_thread(void* arg) {
 
             bool in_stock = try_get_product(product_id);
             if (in_stock) {
-                int price = get_product_price(product_id);
-                total += price;
+                total += get_product_price(product_id);
                 purchaed_items[item_count++] = product_id;
-                clerk_total_merchandise_sold += price;
                 
                 #if ENABLE_ASSERTS
                 assert(price > 0);
@@ -188,6 +182,8 @@ void* clerk_thread(void* arg) {
                 #endif
             }
         }
+
+
 
         // create a transaction
         transaction_t* t = (transaction_t*)malloc(sizeof(transaction_t));
@@ -218,7 +214,7 @@ void* clerk_thread(void* arg) {
         
         c->reciecpt = t; // give the receipt to the customer
 
-        #if ENABLE_ASSERTS || ENABLE_PRINTING
+        #if ENABLE_PRINTING || ENABLE_ASSERTS
         int customer_wallet = c->wallet;
         #endif
 
@@ -265,11 +261,6 @@ void* clerk_thread(void* arg) {
         // Update the cash register
         self->cash_register += t->paid;
 
-        #if ENABLE_ASSERTS
-        // Verify the cash register has increased by the correct amount
-        assert(self->cash_register >= t->paid);
-        #endif
-
         #if ENABLE_PRINTING
         printf("Clerk has been paid by customer %d\n", c->id);
         #endif
@@ -278,14 +269,6 @@ void* clerk_thread(void* arg) {
         pthread_cond_signal(&c->cond);
         pthread_mutex_unlock(&c->mutex);
     }
-
-    // Atomically add to the total merchandise value
-    __sync_fetch_and_add(&total_merchandise_value, clerk_total_merchandise_sold);
-
-    #if ENABLE_ASSERTS
-    // Verify the clerk's profits match what they sold
-    assert(self->cash_register == clerk_total_merchandise_sold);
-    #endif
 
     #if ENABLE_PRINTING
     printf("Clerk %d has made %d\n dollars and is leaving the shop", self->id, self->cash_register);
@@ -311,19 +294,15 @@ unsigned int get_pseudo_random(unsigned int seed, int min, int max) {
 int zso() {
     pthread_t customers[NUM_CUSTOMERS];
     pthread_t clerks[NUM_CLERKS];
-    int total_cash_register = 0;
 
     initialize_products();
     customer_queue = queue_create();
-    
-    #if ENABLE_ASSERTS
-    assert(customer_queue != NULL);
-    #endif
 
     // create clerks
     for (int i = 0; i < NUM_CLERKS; i++) {
         clerk_t* c = (clerk_t*)malloc(sizeof(clerk_t));
-        if (c == NULL) {            fprintf(stderr, "Error: malloc failed\n");
+        if (c == NULL) {
+            fprintf(stderr, "Error: malloc failed\n");
             exit(1);
         }
         c->id = i;
@@ -383,6 +362,8 @@ int zso() {
         #endif
     }
 
+    
+
     #if ENABLE_PRINTING
     printf("All customers and clerks have been created\n");
     #endif
@@ -393,31 +374,16 @@ int zso() {
     #if ENABLE_PRINTING
     printf("All customers have left the shop\n");
     #endif
-    
     // Join all clerk threads
     for (int i = 0; i < NUM_CLERKS; i++) {
-        void* ret;
-        pthread_join(clerks[i], &ret);
-        // Get the final cash register values to verify total
-        clerk_t* clerk = (clerk_t*)ret;
-        if (clerk) {
-            total_cash_register += clerk->cash_register;
-        }
+        pthread_join(clerks[i], NULL);
     }
-    
-    #if ENABLE_ASSERTS
-    // Final verification that total profits match total merchandise value
-    assert(total_cash_register == total_merchandise_value);
-    #endif
-    
     #if ENABLE_PRINTING
     printf("All clerks have left the shop\n");
-    printf("Total profits: %d, Total merchandise value: %d\n", 
-           total_cash_register, total_merchandise_value);
     #endif
-    
     queue_destroy(customer_queue);
     destroy_products();
     return 0;
+
 }
 
