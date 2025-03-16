@@ -69,3 +69,15 @@ void queue_destroy(queue* q) {
     }
     free(q);
 }
+
+int queue_size(queue* q) {
+    if (q == NULL) {
+        return 0;
+    }
+    
+    pthread_mutex_lock(&q->lock);
+    int size = q->size;
+    pthread_mutex_unlock(&q->lock);
+    
+    return size;
+}

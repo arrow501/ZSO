@@ -8,16 +8,19 @@
 #include <unistd.h>
 
 #define NUM_CUSTOMERS 100
-#define NUM_CLERKS 1
+#define NUM_CLERKS 3  // Changed to 3 clerks
 
-#define ENABLE_PRINTING 0
-#define ENABLE_ASSERTS 0
+#define ENABLE_PRINTING 1
+#define ENABLE_ASSERTS 1
+
+// Special value to signal clerk to stop
+#define SENTINEL_VALUE ((void*)(-1))
 
 // Define the transaction for passing between customer and clerk
 typedef struct clerk_t {
     int id;
     int cash_register;
-
+    queue* customer_queue;  // Each clerk has their own queue
 } clerk_t;
 
 
@@ -44,9 +47,10 @@ typedef struct customer_t {
 } customer_t;
 
 // Global Variables
-queue* customer_queue;
-
-
+queue* clerk_queues[NUM_CLERKS];  // Array of queues, one per clerk
+pthread_mutex_t queue_mutex;      // For atomic queue size checking
+int customers_remaining;          // Track how many customers haven't finished
+pthread_mutex_t customers_mutex;  // Protect the counter
 
 void* customer_thread(void* arg) {
     customer_t* self = (customer_t*)arg;
@@ -62,7 +66,23 @@ void* customer_thread(void* arg) {
     #if ENABLE_PRINTING
     printf("Customer %d has entered the shop\n", self->id);
     #endif
-    queue_push(customer_queue, self);
+    
+    // Find the shortest queue
+    pthread_mutex_lock(&queue_mutex);
+    int shortest_queue_idx = 0;
+    int shortest_length = queue_size(clerk_queues[0]);
+    
+    for (int i = 1; i < NUM_CLERKS; i++) {
+        int current_length = queue_size(clerk_queues[i]);
+        if (current_length < shortest_length) {
+            shortest_length = current_length;
+            shortest_queue_idx = i;
+        }
+    }
+    
+    // Join the shortest queue
+    queue_push(clerk_queues[shortest_queue_idx], self);
+    pthread_mutex_unlock(&queue_mutex);
 
     pthread_mutex_lock(&self->mutex);
 
@@ -101,6 +121,17 @@ void* customer_thread(void* arg) {
 
     pthread_mutex_unlock(&self->mutex);
 
+    // Update remaining customers count and signal clerks if needed
+    pthread_mutex_lock(&customers_mutex);
+    customers_remaining--;
+    if (customers_remaining == 0) {
+        // All customers are done, add sentinel to all queues
+        for (int i = 0; i < NUM_CLERKS; i++) {
+            queue_push(clerk_queues[i], SENTINEL_VALUE);
+        }
+    }
+    pthread_mutex_unlock(&customers_mutex);
+
     // Leave the shop
     #if ENABLE_PRINTING
     printf("Customer %d has left the shop\n", self->id);
@@ -130,9 +161,16 @@ void* clerk_thread(void* arg) {
     printf("Clerk %d has entered the shop\n", self->id);
     #endif
 
-    for (int i = 0; i < NUM_CUSTOMERS; i++) {
-        // pop customer from queue; this is blocking
-        customer_t* c = (customer_t*)queue_pop(customer_queue);
+    while (1) {
+        // Pop customer from queue; this is blocking
+        void* customer_ptr = queue_pop(self->customer_queue);
+        
+        // Check if this is the sentinel value signaling to stop
+        if (customer_ptr == SENTINEL_VALUE) {
+            break;
+        }
+        
+        customer_t* c = (customer_t*)customer_ptr;
         
         #if ENABLE_ASSERTS
         assert(c != NULL);
@@ -168,7 +206,8 @@ void* clerk_thread(void* arg) {
 
             bool in_stock = try_get_product(product_id);
             if (in_stock) {
-                total += get_product_price(product_id);
+                int price = get_product_price(product_id);
+                total += price;
                 purchaed_items[item_count++] = product_id;
                 
                 #if ENABLE_ASSERTS
@@ -296,9 +335,18 @@ int zso() {
     pthread_t clerks[NUM_CLERKS];
 
     initialize_products();
-    customer_queue = queue_create();
+    
+    // Initialize mutexes
+    pthread_mutex_init(&queue_mutex, NULL);
+    pthread_mutex_init(&customers_mutex, NULL);
+    customers_remaining = NUM_CUSTOMERS;
+    
+    // Create queues for each clerk
+    for (int i = 0; i < NUM_CLERKS; i++) {
+        clerk_queues[i] = queue_create();
+    }
 
-    // create clerks
+    // Create clerks
     for (int i = 0; i < NUM_CLERKS; i++) {
         clerk_t* c = (clerk_t*)malloc(sizeof(clerk_t));
         if (c == NULL) {
@@ -307,6 +355,7 @@ int zso() {
         }
         c->id = i;
         c->cash_register = 0;
+        c->customer_queue = clerk_queues[i];
         
         #if ENABLE_ASSERTS
         int result = pthread_create(&clerks[i], NULL, clerk_thread, c);
@@ -316,7 +365,7 @@ int zso() {
         #endif
     }
 
-    // create customers
+    // Create customers
     for (int i = 0; i < NUM_CUSTOMERS; i++) {
         customer_t* c = (customer_t*)malloc(sizeof(customer_t)); // customer must remember to free itself
         if (c == NULL) {
@@ -362,8 +411,6 @@ int zso() {
         #endif
     }
 
-    
-
     #if ENABLE_PRINTING
     printf("All customers and clerks have been created\n");
     #endif
@@ -378,10 +425,14 @@ int zso() {
     for (int i = 0; i < NUM_CLERKS; i++) {
         pthread_join(clerks[i], NULL);
     }
-    #if ENABLE_PRINTING
-    printf("All clerks have left the shop\n");
-    #endif
-    queue_destroy(customer_queue);
+
+    // Clean up resources
+    for (int i = 0; i < NUM_CLERKS; i++) {
+        queue_destroy(clerk_queues[i]);
+    }
+    pthread_mutex_destroy(&queue_mutex);
+    pthread_mutex_destroy(&customers_mutex);
+    
     destroy_products();
     return 0;
 
