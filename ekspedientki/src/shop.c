@@ -156,10 +156,10 @@ void* clerk_thread(void* arg) {
         if (total == 0) {
             // Special case: No items purchased, no need to wait for payment
             printf("No items purchased by customer %d\n", c->id);
-            
+
             // The customer will still signal us, so we should wait for that signal
             pthread_cond_wait(&c->cond, &c->mutex);
-            
+
             // The rest remains the same
             t->paid = 0; // Ensure paid is 0
         } else {
@@ -197,47 +197,26 @@ void* clerk_thread(void* arg) {
     return NULL;
 }
 
+// Function to generate deterministic pseudo-random numbers
+unsigned int get_pseudo_random(unsigned int seed, int min, int max) {
+    // Linear Congruential Generator parameters (from glibc)
+    const unsigned int a = 1103515245;
+    const unsigned int c = 12345;
+    const unsigned int m = 0x7fffffff; // 2^31 - 1
+
+    // Generate next value in sequence
+    unsigned int next = (a * seed + c) & m;
+
+    // Scale to desired range
+    return min + (next % (max - min + 1));
+}
+
 int main() {
     pthread_t customers[NUM_CUSTOMERS];
     pthread_t clerks[NUM_CLERKS];
 
     initialize_products();
     customer_queue = queue_create();
-
-    // create customers
-    for (int i = 0; i < NUM_CUSTOMERS; i++) {
-
-
-        customer_t* c = (customer_t*)malloc(sizeof(customer_t)); // customer must remember to free itself
-        if (c == NULL) {
-            fprintf(stderr, "Error: malloc failed\n");
-            exit(1);
-        }
-
-        c->myself = c;
-        c->id = i;
-        c->wallet = 100;
-        c->reciecpt = NULL;
-
-        // procedurally generate the shopping list
-        c->shopping_list_size = i % 10 + 2;
-        c->shopping_list = (int*)malloc(sizeof(int) * c->shopping_list_size);
-
-        if (c->shopping_list == NULL) {
-            fprintf(stderr, "Error: malloc failed\n");
-            exit(1);
-        }
-        int pseudo_random = 1;
-        for (int j = 0; j < c->shopping_list_size; j++) {
-            pseudo_random = ((pseudo_random * (i + 1) * (j + 1)) % 50) + 1; // Range 1-50
-            c->shopping_list[j] = pseudo_random - 1;
-        }
-
-
-        pthread_cond_init(&c->cond, NULL);
-        pthread_mutex_init(&c->mutex, NULL);
-        pthread_create(&customers[i], NULL, customer_thread, c);
-    }
 
     // create clerks
     for (int i = 0; i < NUM_CLERKS; i++) {
@@ -251,6 +230,49 @@ int main() {
         pthread_create(&clerks[i], NULL, clerk_thread, c);
 
     }
+
+    // create customers
+    for (int i = 0; i < NUM_CUSTOMERS; i++) {
+        customer_t* c = (customer_t*)malloc(sizeof(customer_t)); // customer must remember to free itself
+        if (c == NULL) {
+            fprintf(stderr, "Error: malloc failed\n");
+            exit(1);
+        }
+
+        c->myself = c;
+        c->id = i;
+        c->wallet = get_pseudo_random(i, 100, 5000); 
+        c->reciecpt = NULL;
+
+        // Determine shopping list size (between 2 and 11 items)
+        c->shopping_list_size = get_pseudo_random(i, 1, 10);
+
+        // Allocate memory for shopping list
+        c->shopping_list = (int*)malloc(sizeof(int) * c->shopping_list_size);
+        if (c->shopping_list == NULL) {
+            fprintf(stderr, "Error: malloc failed\n");
+            exit(1);
+        }
+
+        // Generate shopping list using improved pseudo-random generator
+        unsigned int seed = 12345 + i * 17; // Base seed unique to each customer
+        for (int j = 0; j < c->shopping_list_size; j++) {
+            // Update seed for each item to improve distribution
+            seed = seed + j * 31;
+
+            // Generate product ID in range 0 to (MAX_PRODUCTS-1)
+            c->shopping_list[j] = get_pseudo_random(seed, 0, MAX_PRODUCTS - 1);
+        }
+
+        // Initialize synchronization primitives
+        pthread_cond_init(&c->cond, NULL);
+        pthread_mutex_init(&c->mutex, NULL);
+
+        // Create customer thread
+        pthread_create(&customers[i], NULL, customer_thread, c);
+    }
+
+    
 
     printf("All customers and clerks have been created\n");
     // Join all customer threads
