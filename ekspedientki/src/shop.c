@@ -6,6 +6,7 @@
 #include <stdlib.h>
 #include <pthread.h>
 #include <unistd.h>
+#include <math.h>
 
 #define NUM_CUSTOMERS 100
 #define NUM_CLERKS 3  // Changed to 3 clerks
@@ -46,11 +47,76 @@ typedef struct customer_t {
     pthread_mutex_t mutex;
 } customer_t;
 
+// Assistant job structure
+typedef struct assistant_job_t {
+    int product_id;           // Product that needs assistance
+    int clerk_id;             // ID of the clerk requesting assistance
+    pthread_mutex_t* mutex;   // Mutex for synchronization
+    pthread_cond_t* cond;     // Condition variable for signaling
+    int* completed;           // Flag to indicate completion
+} assistant_job_t;
+
 // Global Variables
 queue* clerk_queues[NUM_CLERKS];  // Array of queues, one per clerk
 pthread_mutex_t queue_mutex;      // For atomic queue size checking
 int customers_remaining;          // Track how many customers haven't finished
 pthread_mutex_t customers_mutex;  // Protect the counter
+
+// Assistant variables
+queue* assistant_queue;           // Queue for assistant tasks
+pthread_t assistant_thread_id;    // Assistant thread ID
+int assistant_running = 1;        // Flag to control assistant thread
+
+// Assistant thread function
+void* assistant_thread(void* arg) {
+    #if ENABLE_PRINTING
+    printf("Assistant has entered the shop\n");
+    #endif
+
+    while (1) {
+        // Get a job from the queue
+        void* job_ptr = queue_pop(assistant_queue);
+        
+        // Check if this is the sentinel value signaling to stop
+        if (job_ptr == SENTINEL_VALUE) {
+            break;
+        }
+        
+        assistant_job_t* job = (assistant_job_t*)job_ptr;
+        
+        #if ENABLE_PRINTING
+        printf("Assistant is preparing product %d for clerk %d\n", job->product_id, job->clerk_id);
+        #endif
+        
+        // Simulate work with some math operations
+        double result = 0;
+        for (int i = 0; i < 1000000; i++) {
+            result += sin(i) * cos(i);
+            if (i % 100000 == 0) {
+                result = fmod(result, 10.0);  // Keep the number manageable
+            }
+        }
+        
+        // Mark job as completed
+        pthread_mutex_lock(job->mutex);
+        *job->completed = 1;
+        pthread_cond_signal(job->cond);
+        pthread_mutex_unlock(job->mutex);
+        
+        #if ENABLE_PRINTING
+        printf("Assistant finished preparing product %d (calculated %f)\n", job->product_id, result);
+        #endif
+        
+        // Free the job structure
+        free(job);
+    }
+    
+    #if ENABLE_PRINTING
+    printf("Assistant is leaving the shop\n");
+    #endif
+    
+    return NULL;
+}
 
 void* customer_thread(void* arg) {
     customer_t* self = (customer_t*)arg;
@@ -194,9 +260,34 @@ void* clerk_thread(void* arg) {
         // ring up the customer
         int total = 0, item_count = 0;
 
+        // Keep track of special products that need assistant
+        int special_products_count = 0;
+        pthread_mutex_t assistant_wait_mutex = PTHREAD_MUTEX_INITIALIZER;
+        pthread_cond_t assistant_wait_cond = PTHREAD_COND_INITIALIZER;
+        int* special_products_completed = NULL;
+
+        // First count how many special products we have
+        for (int i = 0; i < c->shopping_list_size; i++) {
+            int product_id = c->shopping_list[i];
+            if (product_needs_assistant(product_id)) {
+                special_products_count++;
+            }
+        }
+
+        // Allocate tracking array if we have special products
+        if (special_products_count > 0) {
+            special_products_completed = (int*)calloc(special_products_count, sizeof(int));
+            if (special_products_completed == NULL) {
+                fprintf(stderr, "Error: calloc failed\n");
+                exit(1);
+            }
+        }
+
         #if ENABLE_PRINTING
-        printf("Clerk %d\n is ringing up customer %d\n", self->id, c->id);
+        printf("Clerk %d is ringing up customer %d\n", self->id, c->id);
         #endif
+        
+        int special_index = 0;
         for (int i = 0; i < c->shopping_list_size; i++) {
             int product_id = c->shopping_list[i];
             
@@ -213,6 +304,29 @@ void* clerk_thread(void* arg) {
                 #if ENABLE_ASSERTS
                 assert(price > 0);
                 #endif
+                
+                // If this product needs assistant preparation
+                if (product_needs_assistant(product_id)) {
+                    #if ENABLE_PRINTING
+                    printf("Clerk %d requests assistant for product %d\n", self->id, product_id);
+                    #endif
+                    
+                    // Create a job for the assistant
+                    assistant_job_t* job = (assistant_job_t*)malloc(sizeof(assistant_job_t));
+                    if (job == NULL) {
+                        fprintf(stderr, "Error: malloc failed\n");
+                        exit(1);
+                    }
+                    
+                    job->product_id = product_id;
+                    job->clerk_id = self->id;
+                    job->mutex = &assistant_wait_mutex;
+                    job->cond = &assistant_wait_cond;
+                    job->completed = &special_products_completed[special_index++];
+                    
+                    // Add job to assistant queue
+                    queue_push(assistant_queue, job);
+                }
             }
             // Add a debug print here:
             else {
@@ -222,7 +336,37 @@ void* clerk_thread(void* arg) {
             }
         }
 
-
+        // Wait for all special products to be prepared by the assistant
+        if (special_products_count > 0) {
+            pthread_mutex_lock(&assistant_wait_mutex);
+            
+            // Check if all special products are completed
+            int all_completed = 0;
+            while (!all_completed) {
+                all_completed = 1;
+                for (int i = 0; i < special_products_count; i++) {
+                    if (!special_products_completed[i]) {
+                        all_completed = 0;
+                        break;
+                    }
+                }
+                
+                if (!all_completed) {
+                    #if ENABLE_PRINTING
+                    printf("Clerk %d waiting for assistant to prepare products\n", self->id);
+                    #endif
+                    pthread_cond_wait(&assistant_wait_cond, &assistant_wait_mutex);
+                }
+            }
+            
+            pthread_mutex_unlock(&assistant_wait_mutex);
+            #if ENABLE_PRINTING
+            printf("Clerk %d has received all prepared products\n", self->id);
+            #endif
+            
+            // Free the tracking array
+            free(special_products_completed);
+        }
 
         // create a transaction
         transaction_t* t = (transaction_t*)malloc(sizeof(transaction_t));
@@ -281,6 +425,10 @@ void* clerk_thread(void* arg) {
                 pthread_cond_wait(&c->cond, &c->mutex);
             }
         }
+
+        // Clean up assistant synchronization objects
+        pthread_mutex_destroy(&assistant_wait_mutex);
+        pthread_cond_destroy(&assistant_wait_cond);
 
         #if ENABLE_PRINTING
         printf("total: %d\n", total);
@@ -345,6 +493,10 @@ int zso() {
     for (int i = 0; i < NUM_CLERKS; i++) {
         clerk_queues[i] = queue_create();
     }
+
+    // Create assistant queue and thread
+    assistant_queue = queue_create();
+    pthread_create(&assistant_thread_id, NULL, assistant_thread, NULL);
 
     // Create clerks
     for (int i = 0; i < NUM_CLERKS; i++) {
@@ -421,6 +573,11 @@ int zso() {
     #if ENABLE_PRINTING
     printf("All customers have left the shop\n");
     #endif
+
+    // Signal the assistant to stop and join
+    queue_push(assistant_queue, SENTINEL_VALUE);
+    pthread_join(assistant_thread_id, NULL);
+    
     // Join all clerk threads
     for (int i = 0; i < NUM_CLERKS; i++) {
         pthread_join(clerks[i], NULL);
@@ -430,6 +587,7 @@ int zso() {
     for (int i = 0; i < NUM_CLERKS; i++) {
         queue_destroy(clerk_queues[i]);
     }
+    queue_destroy(assistant_queue);
     pthread_mutex_destroy(&queue_mutex);
     pthread_mutex_destroy(&customers_mutex);
     
