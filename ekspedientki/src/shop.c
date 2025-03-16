@@ -174,6 +174,9 @@ void* clerk_thread(void* arg) {
         pthread_cond_signal(&c->cond);
         pthread_mutex_unlock(&c->mutex);
     }
+
+    printf("Clerk %d has made %d\n dollars and is leaving the shop", self->id, self->cash_register);
+    free(self);
     return NULL;
 }
 
@@ -228,14 +231,19 @@ int main() {
         }
         c->id = i;
         c->cash_register = 0;
-        // pthread_cond_init(&c->cond, NULL);
-        // pthread_mutex_init(&c->mutex, NULL);
         pthread_create(&clerks[i], NULL, clerk_thread, c);
 
     }
 
-    pthread_join(custormers[0], NULL);
-    pthread_join(clerks[0], NULL);
+    // Join all customer threads
+    for (int i = 0; i < NUM_CUSTOMERS; i++) {
+        pthread_join(custormers[i], NULL);
+    }
+    
+    // Join all clerk threads
+    for (int i = 0; i < NUM_CLERKS; i++) {
+        pthread_join(clerks[i], NULL);
+    }
 
     queue_destroy(customer_queue);
     return 0;
