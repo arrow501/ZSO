@@ -117,6 +117,10 @@ void* clerk_thread(void* arg) {
                 total += get_product_price(product_id);
                 purchaed_items[item_count++] = product_id;
             }
+            // Add a debug print here:
+            else {
+                printf("Product %d out of stock for customer %d\n", product_id, c->id);
+            }
         }
 
 
@@ -149,11 +153,22 @@ void* clerk_thread(void* arg) {
         // Signal the customer to pay    
         pthread_cond_signal(&c->cond);
 
-        printf("Clerk is waiting for customer %d to pay\n", c->id);
-
-        // Wait for the customer to pay
-        while (t->paid < t->total) {
+        if (total == 0) {
+            // Special case: No items purchased, no need to wait for payment
+            printf("No items purchased by customer %d\n", c->id);
+            
+            // The customer will still signal us, so we should wait for that signal
             pthread_cond_wait(&c->cond, &c->mutex);
+            
+            // The rest remains the same
+            t->paid = 0; // Ensure paid is 0
+        } else {
+            printf("Clerk is waiting for customer %d to pay\n", c->id);
+
+            // Wait for the customer to pay
+            while (t->paid < t->total) {
+                pthread_cond_wait(&c->cond, &c->mutex);
+            }
         }
 
         printf("total: %d\n", total);
