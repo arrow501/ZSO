@@ -2,6 +2,7 @@
 
 
 
+
 /* Global Variables*/
 product_t products[MAX_PRODUCTS];
 int num_products = 0;
@@ -19,6 +20,7 @@ pthread_mutex_t inventory_mutex;
     } while (0)
 
 void initialize_products(){
+    pthread_mutex_init(&inventory_mutex, NULL); // Initialize the mutex
     INIT_PRODUCT(0, "Banana", 129, 45, false);
     INIT_PRODUCT(1, "Apple", 159, 50, false);
     INIT_PRODUCT(2, "Bread", 349, 32, false);
@@ -85,10 +87,18 @@ bool try_get_product(int product_id) {
 }
 
 int get_product_price(int product_id) {
+    if (product_id < 0 || product_id >= MAX_PRODUCTS) {
+        fprintf(stderr, "Error: Invalid product ID\n");
+        exit(1);
+    }
     return products[product_id].price;
 }
 
 bool product_needs_assistant(int product_id)
 {
     return products[product_id].needs_assistant;
+}
+
+void destroy_products(){
+    pthread_mutex_destroy(&inventory_mutex);
 }

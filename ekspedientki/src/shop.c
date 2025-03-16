@@ -7,7 +7,7 @@
 #include <pthread.h>
 #include <unistd.h>
 
-#define NUM_CUSTOMERS 10
+#define NUM_CUSTOMERS 100
 #define NUM_CLERKS 1
 
 
@@ -163,6 +163,8 @@ void* clerk_thread(void* arg) {
         printf("expected wallet: %d\n", customer_wallet - total);
         printf("actual wallet: %d\n", c->wallet);
 
+        assert(total == t->total); // check if the total is correct
+        assert(t->paid == t->total); // check if the customer paid the correct amount
         assert(customer_wallet - total == c->wallet); // check if the customer paid the correct amount
 
         // Update the cash register
@@ -181,7 +183,7 @@ void* clerk_thread(void* arg) {
 }
 
 int main() {
-    pthread_t custormers[NUM_CUSTOMERS];
+    pthread_t customers[NUM_CUSTOMERS];
     pthread_t clerks[NUM_CLERKS];
 
     initialize_products();
@@ -210,16 +212,16 @@ int main() {
             fprintf(stderr, "Error: malloc failed\n");
             exit(1);
         }
-        int pseduo_random = 1;
+        int pseudo_random = 1;
         for (int j = 0; j < c->shopping_list_size; j++) {
-            pseduo_random = (pseduo_random * (i + 1) * (j + 1)) % MAX_PRODUCTS;
-            c->shopping_list[j] = j;
+            pseudo_random = ((pseudo_random * (i + 1) * (j + 1)) % 50) + 1; // Range 1-50
+            c->shopping_list[j] = pseudo_random - 1;
         }
 
 
         pthread_cond_init(&c->cond, NULL);
         pthread_mutex_init(&c->mutex, NULL);
-        pthread_create(&custormers[i], NULL, customer_thread, c);
+        pthread_create(&customers[i], NULL, customer_thread, c);
     }
 
     // create clerks
@@ -235,17 +237,19 @@ int main() {
 
     }
 
+    printf("All customers and clerks have been created\n");
     // Join all customer threads
     for (int i = 0; i < NUM_CUSTOMERS; i++) {
-        pthread_join(custormers[i], NULL);
+        pthread_join(customers[i], NULL);
     }
-    
+    printf("All customers have left the shop\n");
     // Join all clerk threads
     for (int i = 0; i < NUM_CLERKS; i++) {
         pthread_join(clerks[i], NULL);
     }
-
+    printf("All clerks have left the shop\n");
     queue_destroy(customer_queue);
+    destroy_products();
     return 0;
 
 }
