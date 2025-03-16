@@ -64,7 +64,7 @@ void queue_destroy(queue* q) {
     while (q->head != NULL) {
         queue_node* node = q->head;
         q->head = node->next;
-        free(node->data);
+        // free(node->data);
         free(node);
     }
     free(q);
