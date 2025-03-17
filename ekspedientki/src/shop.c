@@ -11,6 +11,8 @@
 #define NUM_CUSTOMERS 100
 #define NUM_CLERKS 3  // Changed to 3 clerks
 
+#define ASSISTANT_WORK_INTENSITY 100;
+
 #define ENABLE_PRINTING 1
 #define ENABLE_ASSERTS 1
 
@@ -90,9 +92,9 @@ void* assistant_thread(void* arg) {
         
         // Simulate work with some math operations
         double result = 0;
-        for (int i = 0; i < 1000000; i++) {
+        for (int i = 0; i < ASSISTANT_WORK_INTENSITY * 100; i++) {
             result += sin(i) * cos(i);
-            if (i % 100000 == 0) {
+            if (i % ASSISTANT_WORK_INTENSITY == 0) {
                 result = fmod(result, 10.0);  // Keep the number manageable
             }
         }
