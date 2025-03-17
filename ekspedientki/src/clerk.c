@@ -1,5 +1,6 @@
 #include "clerk.h"
 
+
 /* Global Variables */
 queue* clerk_queues[NUM_CLERKS];  // Array of queues, one per clerk
 
@@ -10,7 +11,8 @@ queue* clerk_queues[NUM_CLERKS];  // Array of queues, one per clerk
  * @param arg Pointer to a clerk_t structure
  * @return Always returns NULL
  */
-void* clerk_thread(void* arg) {
+
+ void* clerk_thread(void* arg) {
     clerk_t* self = (clerk_t*)arg;
     #if ENABLE_PRINTING
     printf("Clerk %d has entered the shop\n", self->id);

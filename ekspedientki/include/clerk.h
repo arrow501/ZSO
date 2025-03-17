@@ -5,6 +5,10 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <stdbool.h>
+#include <assert.h>
+
+#include "transaction.h"
+#include "customer.h"
 #include "queue.h"
 #include "parameters.h"
 #include "product.h"
