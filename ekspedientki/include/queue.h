@@ -6,20 +6,34 @@
 #include <stdio.h>
 #include <stdlib.h>
 
+/**
+ * Queue Module
+ * 
+ * This module implements a thread-safe queue data structure
+ * used throughout the shop simulation for managing work items
+ * and coordinating between different threads.
+ */
+
+/**
+ * Represents a node in the queue linked list.
+ */
 typedef struct queue_node
 {
-    struct queue_node* next;
-    void* data;
+    struct queue_node* next; // Pointer to next node
+    void* data;              // Pointer to stored data
 } queue_node;
 
+/**
+ * Thread-safe queue structure with mutex and condition variable.
+ */
 typedef struct
 {
-    queue_node* head;
-    queue_node* tail;
-    int size;
+    queue_node* head;        // Pointer to first node
+    queue_node* tail;        // Pointer to last node
+    int size;               // Number of items in queue
 
-    pthread_mutex_t lock;
-    pthread_cond_t cond;
+    pthread_mutex_t lock;    // Mutex for thread safety
+    pthread_cond_t cond;     // Condition variable for signaling
 } queue;
 
 /**
@@ -61,4 +75,5 @@ void queue_destroy(queue* q);
  * @return Number of items in the queue
  */
 int queue_size(queue* q);
+
 #endif

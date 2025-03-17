@@ -26,12 +26,13 @@
  * 5. Collects payment
  */
 
-/* Global Variables */
-extern queue* clerk_queues[NUM_CLERKS];  // Array of queues, one per clerk
+/**
+ * Array of queues, one per clerk. Each queue contains waiting customers.
+ */
+extern queue* clerk_queues[NUM_CLERKS];
 
 /**
  * Represents a clerk in the shop.
- * Each clerk has their own queue and cash register.
  */
 typedef struct clerk_t {
     int id;                  // Unique ID for the clerk
@@ -48,4 +49,4 @@ typedef struct clerk_t {
  */
 void* clerk_thread(void* arg);
 
-#endif
+#endif /* CLERK_H */

@@ -15,13 +15,18 @@
  * The assistant runs in a separate thread and processes jobs from a queue.
  */
 
-/* Global Variables */
-extern queue* assistant_queue;           // Queue for assistant tasks
-extern pthread_t assistant_thread_id;    // Assistant thread ID
+/**
+ * Queue for assistant tasks.
+ */
+extern queue* assistant_queue;
+
+/**
+ * Assistant thread ID.
+ */
+extern pthread_t assistant_thread_id;
 
 /**
  * Represents a job for the assistant to process.
- * Each job corresponds to a product that needs special preparation.
  */
 typedef struct assistant_job_t {
     int product_id;           // Product that needs assistance
@@ -40,4 +45,4 @@ typedef struct assistant_job_t {
  */
 void* assistant_thread(void* arg);
 
-#endif
+#endif /* ASSISTANT_H */
