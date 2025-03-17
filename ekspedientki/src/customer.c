@@ -48,26 +48,26 @@ void* customer_thread(void* arg) {
     pthread_mutex_lock(&self->mutex);
 
     // Wait for the clerk to serve me
-    while (self->reciecpt == NULL) {
+    while (self->receipt == NULL) {
         pthread_cond_wait(&self->cond, &self->mutex);
     }
 
     #if ENABLE_ASSERTS
     // Verify receipt is valid
-    assert(self->reciecpt != NULL);
-    assert(self->reciecpt->total >= 0);
+    assert(self->receipt != NULL);
+    assert(self->receipt->total >= 0);
     // I decided Customers can go into debt
     // // Ensure customer has enough money
-    // assert(self->wallet >= self->reciecpt->total);
+    // assert(self->wallet >= self->receipt->total);
     #endif
 
     // Check the receipt and pay
-    self->wallet -= self->reciecpt->total;
-    self->reciecpt->paid = self->reciecpt->total;
+    self->wallet -= self->receipt->total;
+    self->receipt->paid = self->receipt->total;
 
     #if ENABLE_ASSERTS
     // Verify payment was made correctly
-    assert(self->reciecpt->paid == self->reciecpt->total);
+    assert(self->receipt->paid == self->receipt->total);
     #endif
 
     // Signal the clerk that I have paid
@@ -102,13 +102,13 @@ void* customer_thread(void* arg) {
     #endif
 
     #if ENABLE_ASSERTS
-    assert(self->reciecpt != NULL);
-    assert(self->reciecpt->items != NULL || self->reciecpt->items_size == 0);
+    assert(self->receipt != NULL);
+    assert(self->receipt->items != NULL || self->receipt->items_size == 0);
     #endif
 
     // Clean up my properties - only after transaction is fully complete
-    free(self->reciecpt->items);
-    free(self->reciecpt);
+    free(self->receipt->items);
+    free(self->receipt);
     free(self->shopping_list);
     pthread_mutex_destroy(&self->mutex);
     pthread_cond_destroy(&self->cond);

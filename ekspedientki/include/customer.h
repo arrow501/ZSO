@@ -12,7 +12,7 @@ typedef struct customer_t {
     int* shopping_list;
     int shopping_list_size;
 
-    transaction_t* reciecpt;
+    transaction_t* receipt;
 
     pthread_cond_t cond;
     pthread_mutex_t mutex;

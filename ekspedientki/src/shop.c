@@ -79,7 +79,7 @@ int zso() {
         c->myself = c;
         c->id = i;
         c->wallet = get_pseudo_random(i, 100, 5000); 
-        c->reciecpt = NULL;
+        c->receipt = NULL;
 
         // Determine shopping list size (between 2 and 11 items)
         c->shopping_list_size = get_pseudo_random(i, 1, 10);

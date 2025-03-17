@@ -207,7 +207,7 @@ queue* clerk_queues[NUM_CLERKS];  // Array of queues, one per clerk
             fprintf(stderr, "Error: malloc failed\n");
             exit(1);
         }
-        // copy the 
+        // copy the purchased items into a smaller array
         for (int i = 0; i < item_count; i++) {
             t->items[i] = purchaed_items[i];
         }
@@ -216,10 +216,10 @@ queue* clerk_queues[NUM_CLERKS];  // Array of queues, one per clerk
         pthread_mutex_lock(&c->mutex);
         
         #if ENABLE_ASSERTS
-        assert(c->reciecpt == NULL);  // Customer shouldn't have a receipt yet
+        assert(c->receipt == NULL);  // Customer shouldn't have a receipt yet
         #endif
         
-        c->reciecpt = t; // give the receipt to the customer
+        c->receipt = t; // give the receipt to the customer
 
         #if ENABLE_PRINTING || ENABLE_ASSERTS
         int customer_wallet = c->wallet;
@@ -257,7 +257,7 @@ queue* clerk_queues[NUM_CLERKS];  // Array of queues, one per clerk
         #if ENABLE_PRINTING
         pthread_mutex_lock(&printf_mutex);
         printf("total: %d\n", total);
-        printf("reciept total: %d\n", t->total);
+        printf("receipt total: %d\n", t->total);
         printf("paid: %d\n", t->paid);
         printf("customer_wallet: %d\n", customer_wallet);
         printf("expected wallet: %d\n", customer_wallet - total);
