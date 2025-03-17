@@ -1,4 +1,5 @@
 #include "assistant.h"
+#include "customer.h" // Include for printf_mutex
 #include <stdio.h>
 #include <stdlib.h>
 
@@ -40,7 +41,9 @@ void* assistant_thread(void* arg) {
     (void)arg; // Suppress unused parameter warning
     
     #if ENABLE_PRINTING
+    pthread_mutex_lock(&printf_mutex);
     printf("Assistant has entered the shop\n");
+    pthread_mutex_unlock(&printf_mutex);
     #endif
 
     while (assistant_running) {
@@ -55,7 +58,9 @@ void* assistant_thread(void* arg) {
         assistant_job_t* job = (assistant_job_t*)job_ptr;
         
         #if ENABLE_PRINTING
+        pthread_mutex_lock(&printf_mutex);
         printf("Assistant is preparing product %d for clerk %d\n", job->product_id, job->clerk_id);
+        pthread_mutex_unlock(&printf_mutex);
         #endif
         
         // Simulate the work of preparing the product
@@ -68,7 +73,9 @@ void* assistant_thread(void* arg) {
         pthread_mutex_unlock(job->mutex);
         
         #if ENABLE_PRINTING
+        pthread_mutex_lock(&printf_mutex);
         printf("Assistant finished preparing product %d (calculated %f)\n", job->product_id, result);
+        pthread_mutex_unlock(&printf_mutex);
         #endif
         
         // Free the job structure after completion
@@ -76,7 +83,9 @@ void* assistant_thread(void* arg) {
     }
     
     #if ENABLE_PRINTING
+    pthread_mutex_lock(&printf_mutex);
     printf("Assistant is leaving the shop\n");
+    pthread_mutex_unlock(&printf_mutex);
     #endif
     
     return NULL;

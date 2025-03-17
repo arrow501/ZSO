@@ -1,5 +1,5 @@
 #include "clerk.h"
-
+#include "customer.h"
 
 /* Global Variables */
 queue* clerk_queues[NUM_CLERKS];  // Array of queues, one per clerk
@@ -15,7 +15,9 @@ queue* clerk_queues[NUM_CLERKS];  // Array of queues, one per clerk
  void* clerk_thread(void* arg) {
     clerk_t* self = (clerk_t*)arg;
     #if ENABLE_PRINTING
+    pthread_mutex_lock(&printf_mutex);
     printf("Clerk %d has entered the shop\n", self->id);
+    pthread_mutex_unlock(&printf_mutex);
     #endif
 
     while (1) {
@@ -38,7 +40,9 @@ queue* clerk_queues[NUM_CLERKS];  // Array of queues, one per clerk
         #endif
         
         #if ENABLE_PRINTING
+        pthread_mutex_lock(&printf_mutex);
         printf("Clerk is serving customer %d\n", c->id);
+        pthread_mutex_unlock(&printf_mutex);
         #endif
 
         // allocate maximum space for the purchased items
@@ -53,8 +57,24 @@ queue* clerk_queues[NUM_CLERKS];  // Array of queues, one per clerk
 
         // Keep track of special products that need assistant
         int special_products_count = 0;
-        pthread_mutex_t assistant_wait_mutex = PTHREAD_MUTEX_INITIALIZER;
-        pthread_cond_t assistant_wait_cond = PTHREAD_COND_INITIALIZER;
+        
+        // Allocate mutex and cond on the heap to avoid premature destruction
+        pthread_mutex_t* assistant_wait_mutex = NULL;
+        pthread_cond_t* assistant_wait_cond = NULL;
+        
+        if (c->shopping_list_size > 0) {
+            assistant_wait_mutex = malloc(sizeof(pthread_mutex_t));
+            assistant_wait_cond = malloc(sizeof(pthread_cond_t));
+            
+            if (!assistant_wait_mutex || !assistant_wait_cond) {
+                fprintf(stderr, "Error: malloc failed for synchronization primitives\n");
+                exit(1);
+            }
+            
+            pthread_mutex_init(assistant_wait_mutex, NULL);
+            pthread_cond_init(assistant_wait_cond, NULL);
+        }
+        
         int* special_products_completed = NULL;
 
         // First count how many special products we have
@@ -75,7 +95,9 @@ queue* clerk_queues[NUM_CLERKS];  // Array of queues, one per clerk
         }
 
         #if ENABLE_PRINTING
+        pthread_mutex_lock(&printf_mutex);
         printf("Clerk %d is ringing up customer %d\n", self->id, c->id);
+        pthread_mutex_unlock(&printf_mutex);
         #endif
         
         int special_index = 0;
@@ -99,7 +121,9 @@ queue* clerk_queues[NUM_CLERKS];  // Array of queues, one per clerk
                 // If this product needs assistant preparation
                 if (product_needs_assistant(product_id)) {
                     #if ENABLE_PRINTING
+                    pthread_mutex_lock(&printf_mutex);
                     printf("Clerk %d requests assistant for product %d\n", self->id, product_id);
+                    pthread_mutex_unlock(&printf_mutex);
                     #endif
                     
                     // Create a job for the assistant
@@ -111,8 +135,8 @@ queue* clerk_queues[NUM_CLERKS];  // Array of queues, one per clerk
                     
                     job->product_id = product_id;
                     job->clerk_id = self->id;
-                    job->mutex = &assistant_wait_mutex;
-                    job->cond = &assistant_wait_cond;
+                    job->mutex = assistant_wait_mutex;
+                    job->cond = assistant_wait_cond;
                     job->completed = &special_products_completed[special_index++];
                     
                     // Add job to assistant queue
@@ -122,14 +146,16 @@ queue* clerk_queues[NUM_CLERKS];  // Array of queues, one per clerk
             // Add a debug print here:
             else {
                 #if ENABLE_PRINTING
+                pthread_mutex_lock(&printf_mutex);
                 printf("Product %d out of stock for customer %d\n", product_id, c->id);
+                pthread_mutex_unlock(&printf_mutex);
                 #endif
             }
         }
 
         // Wait for all special products to be prepared by the assistant
         if (special_products_count > 0) {
-            pthread_mutex_lock(&assistant_wait_mutex);
+            pthread_mutex_lock(assistant_wait_mutex);
             
             // Check if all special products are completed
             int all_completed = 0;
@@ -144,19 +170,26 @@ queue* clerk_queues[NUM_CLERKS];  // Array of queues, one per clerk
                 
                 if (!all_completed) {
                     #if ENABLE_PRINTING
+                    pthread_mutex_lock(&printf_mutex);
                     printf("Clerk %d waiting for assistant to prepare products\n", self->id);
+                    pthread_mutex_unlock(&printf_mutex);
                     #endif
-                    pthread_cond_wait(&assistant_wait_cond, &assistant_wait_mutex);
+                    pthread_cond_wait(assistant_wait_cond, assistant_wait_mutex);
                 }
             }
             
-            pthread_mutex_unlock(&assistant_wait_mutex);
+            pthread_mutex_unlock(assistant_wait_mutex);
             #if ENABLE_PRINTING
+            pthread_mutex_lock(&printf_mutex);
             printf("Clerk %d has received all prepared products\n", self->id);
+            pthread_mutex_unlock(&printf_mutex);
             #endif
             
-            // Free the tracking array
+            // Free the tracking array - it's safe to free this now
             free(special_products_completed);
+            
+            // Note: We'll free the mutex and condvar later after the transaction is complete
+            // This ensures the assistant thread has fully completed its work
         }
 
         // create a transaction
@@ -170,7 +203,7 @@ queue* clerk_queues[NUM_CLERKS];  // Array of queues, one per clerk
         t->items = malloc(sizeof(int) * item_count);
         t->items_size = item_count;
 
-        if (t->items == NULL) {
+        if (t->items == NULL && item_count > 0) {
             fprintf(stderr, "Error: malloc failed\n");
             exit(1);
         }
@@ -198,7 +231,9 @@ queue* clerk_queues[NUM_CLERKS];  // Array of queues, one per clerk
         if (total == 0) {
             // Special case: No items purchased, no need to wait for payment
             #if ENABLE_PRINTING
+            pthread_mutex_lock(&printf_mutex);
             printf("No items purchased by customer %d\n", c->id);
+            pthread_mutex_unlock(&printf_mutex);
             #endif
 
             // The customer will still signal us, so we should wait for that signal
@@ -208,7 +243,9 @@ queue* clerk_queues[NUM_CLERKS];  // Array of queues, one per clerk
             t->paid = 0; // Ensure paid is 0
         } else {
             #if ENABLE_PRINTING
+            pthread_mutex_lock(&printf_mutex);
             printf("Clerk is waiting for customer %d to pay\n", c->id);
+            pthread_mutex_unlock(&printf_mutex);
             #endif
 
             // Wait for the customer to pay
@@ -217,17 +254,15 @@ queue* clerk_queues[NUM_CLERKS];  // Array of queues, one per clerk
             }
         }
 
-        // Clean up assistant synchronization objects
-        pthread_mutex_destroy(&assistant_wait_mutex);
-        pthread_cond_destroy(&assistant_wait_cond);
-
         #if ENABLE_PRINTING
+        pthread_mutex_lock(&printf_mutex);
         printf("total: %d\n", total);
         printf("reciept total: %d\n", t->total);
         printf("paid: %d\n", t->paid);
         printf("customer_wallet: %d\n", customer_wallet);
         printf("expected wallet: %d\n", customer_wallet - total);
         printf("actual wallet: %d\n", c->wallet);
+        pthread_mutex_unlock(&printf_mutex);
         #endif
 
         #if ENABLE_ASSERTS
@@ -240,16 +275,32 @@ queue* clerk_queues[NUM_CLERKS];  // Array of queues, one per clerk
         self->cash_register += t->paid;
 
         #if ENABLE_PRINTING
+        pthread_mutex_lock(&printf_mutex);
         printf("Clerk has been paid by customer %d\n", c->id);
+        pthread_mutex_unlock(&printf_mutex);
         #endif
 
         // Signal the customer that transaction is fully complete before releasing the mutex
         pthread_cond_signal(&c->cond);
         pthread_mutex_unlock(&c->mutex);
+
+        // NOW we can safely clean up the assistant synchronization objects
+        // The transaction is complete, and we're sure the assistant thread is done with these objects
+        if (assistant_wait_mutex != NULL) {
+            pthread_mutex_destroy(assistant_wait_mutex);
+            free(assistant_wait_mutex);
+        }
+        
+        if (assistant_wait_cond != NULL) {
+            pthread_cond_destroy(assistant_wait_cond);
+            free(assistant_wait_cond);
+        }
     }
 
     #if ENABLE_PRINTING
-    printf("Clerk %d has made %d\n dollars and is leaving the shop", self->id, self->cash_register);
+    pthread_mutex_lock(&printf_mutex);
+    printf("Clerk %d has made %d dollars and is leaving the shop\n", self->id, self->cash_register);
+    pthread_mutex_unlock(&printf_mutex);
     #endif
     free(self);
     return NULL;

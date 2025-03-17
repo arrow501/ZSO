@@ -12,6 +12,7 @@
 pthread_mutex_t queue_mutex;      // For atomic queue size checking
 int customers_remaining;          // Track how many customers haven't finished
 pthread_mutex_t customers_mutex;  // Protect the counter
+pthread_mutex_t printf_mutex;     // Protect printf calls
 
 // Function to generate deterministic pseudo-random numbers
 unsigned int get_pseudo_random(unsigned int seed, int min, int max) {
@@ -36,6 +37,7 @@ int zso() {
     // Initialize mutexes
     pthread_mutex_init(&queue_mutex, NULL);
     pthread_mutex_init(&customers_mutex, NULL);
+    pthread_mutex_init(&printf_mutex, NULL);
     customers_remaining = NUM_CUSTOMERS;
     
     // Create queues for each clerk
@@ -113,14 +115,20 @@ int zso() {
     }
 
     #if ENABLE_PRINTING
+    pthread_mutex_lock(&printf_mutex);
     printf("All customers and clerks have been created\n");
+    pthread_mutex_unlock(&printf_mutex);
     #endif
+    
     // Join all customer threads
     for (int i = 0; i < NUM_CUSTOMERS; i++) {
         pthread_join(customers[i], NULL);
     }
+    
     #if ENABLE_PRINTING
+    pthread_mutex_lock(&printf_mutex);
     printf("All customers have left the shop\n");
+    pthread_mutex_unlock(&printf_mutex);
     #endif
 
     // Signal the assistant to stop and join
@@ -139,6 +147,7 @@ int zso() {
     queue_destroy(assistant_queue);
     pthread_mutex_destroy(&queue_mutex);
     pthread_mutex_destroy(&customers_mutex);
+    pthread_mutex_destroy(&printf_mutex);
     
     destroy_products();
     return 0;

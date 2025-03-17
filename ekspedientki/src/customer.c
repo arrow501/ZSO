@@ -23,7 +23,9 @@ void* customer_thread(void* arg) {
     #endif
 
     #if ENABLE_PRINTING
+    pthread_mutex_lock(&printf_mutex);
     printf("Customer %d has entered the shop\n", self->id);
+    pthread_mutex_unlock(&printf_mutex);
     #endif
     
     // Find the shortest queue
@@ -70,7 +72,9 @@ void* customer_thread(void* arg) {
 
     // Signal the clerk that I have paid
     #if ENABLE_PRINTING
+    pthread_mutex_lock(&printf_mutex);
     printf("Customer %d is paying the clerk\n", self->id);
+    pthread_mutex_unlock(&printf_mutex);
     #endif
     pthread_cond_signal(&self->cond);
 
@@ -92,7 +96,9 @@ void* customer_thread(void* arg) {
 
     // Leave the shop
     #if ENABLE_PRINTING
+    pthread_mutex_lock(&printf_mutex);
     printf("Customer %d has left the shop\n", self->id);
+    pthread_mutex_unlock(&printf_mutex);
     #endif
 
     #if ENABLE_ASSERTS

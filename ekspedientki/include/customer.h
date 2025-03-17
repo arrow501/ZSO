@@ -21,7 +21,7 @@ typedef struct customer_t {
 // Function declarations
 void* customer_thread(void* arg);
 
-// Random number generator helper used for customer creation
-unsigned int get_pseudo_random(unsigned int seed, int min, int max);
+// Mutex for printf calls
+extern pthread_mutex_t printf_mutex;
 
 #endif /* CUSTOMER_H */
