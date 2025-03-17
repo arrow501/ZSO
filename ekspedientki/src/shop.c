@@ -28,27 +28,12 @@ unsigned int get_pseudo_random(unsigned int seed, int min, int max) {
     return min + (next % (max - min + 1));
 }
 
-int zso() {
-    pthread_t customers[NUM_CUSTOMERS];
-    pthread_t clerks[NUM_CLERKS];
-
-    initialize_products();
-    
-    // Initialize mutexes
-    pthread_mutex_init(&queue_mutex, NULL);
-    pthread_mutex_init(&customers_mutex, NULL);
-    pthread_mutex_init(&printf_mutex, NULL);
-    customers_remaining = NUM_CUSTOMERS;
-    
-    // Create queues for each clerk
-    for (int i = 0; i < NUM_CLERKS; i++) {
-        clerk_queues[i] = queue_create();
-    }
-
-    // Create assistant queue and thread
-    assistant_queue = queue_create();
-    pthread_create(&assistant_thread_id, NULL, assistant_thread, NULL);
-
+/**
+ * Create clerk threads and initialize their data structures
+ * 
+ * @param clerks Array to store clerk thread IDs
+ */
+void create_clerks(pthread_t clerks[]) {
     // Create clerks
     for (int i = 0; i < NUM_CLERKS; i++) {
         clerk_t* c = (clerk_t*)malloc(sizeof(clerk_t));
@@ -67,7 +52,14 @@ int zso() {
         pthread_create(&clerks[i], NULL, clerk_thread, c);
         #endif
     }
+}
 
+/**
+ * Create customer threads and initialize their data structures
+ * 
+ * @param customers Array to store customer thread IDs
+ */
+void create_customers(pthread_t customers[]) {
     // Create customers
     for (int i = 0; i < NUM_CUSTOMERS; i++) {
         customer_t* c = (customer_t*)malloc(sizeof(customer_t)); // customer must remember to free itself
@@ -113,6 +105,34 @@ int zso() {
         pthread_create(&customers[i], NULL, customer_thread, c);
         #endif
     }
+}
+
+int zso() {
+    pthread_t customers[NUM_CUSTOMERS];
+    pthread_t clerks[NUM_CLERKS];
+
+    initialize_products();
+    
+    // Initialize mutexes
+    pthread_mutex_init(&queue_mutex, NULL);
+    pthread_mutex_init(&customers_mutex, NULL);
+    pthread_mutex_init(&printf_mutex, NULL);
+    customers_remaining = NUM_CUSTOMERS;
+    
+    // Create queues for each clerk
+    for (int i = 0; i < NUM_CLERKS; i++) {
+        clerk_queues[i] = queue_create();
+    }
+
+    // Create assistant queue and thread
+    assistant_queue = queue_create();
+    pthread_create(&assistant_thread_id, NULL, assistant_thread, NULL);
+
+    // Create clerks 
+    create_clerks(clerks);
+
+    // Create customers
+    create_customers(customers);
 
     #if ENABLE_PRINTING
     pthread_mutex_lock(&printf_mutex);
