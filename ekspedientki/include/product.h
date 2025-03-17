@@ -30,4 +30,6 @@ int get_product_price(int product_id);
 
 void destroy_products();
 
+bool product_needs_assistant(int product_id);
+
 #endif

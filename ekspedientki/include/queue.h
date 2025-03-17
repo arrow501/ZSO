@@ -54,4 +54,11 @@ queue* queue_create();
  */
 void queue_destroy(queue* q);
 
+/**
+ * Get the number of items in the queue.
+ * 
+ * @param q Pointer to queue structure
+ * @return Number of items in the queue
+ */
+int queue_size(queue* q);
 #endif
