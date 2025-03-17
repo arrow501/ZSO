@@ -1,23 +1,16 @@
+#include "shop.h"
+
 #include "queue.h"
 #include "product.h"
+#include "assistant.h"
+#include "parameters.h"
 
-#include <assert.h>
-#include <stdio.h>
-#include <stdlib.h>
-#include <pthread.h>
-#include <unistd.h>
-#include <math.h>
-
-#define NUM_CUSTOMERS 100
-#define NUM_CLERKS 3  // Changed to 3 clerks
-
-#define ASSISTANT_WORK_INTENSITY 100;
-
-#define ENABLE_PRINTING 1
-#define ENABLE_ASSERTS 1
-
-// Special value to signal clerk to stop
-#define SENTINEL_VALUE ((void*)(-1))
+// Global Variables
+queue* clerk_queues[NUM_CLERKS];  // Array of queues, one per clerk
+pthread_mutex_t queue_mutex;      // For atomic queue size checking
+int customers_remaining;          // Track how many customers haven't finished
+pthread_mutex_t customers_mutex;  // Protect the counter
+ 
 
 // Define the transaction for passing between customer and clerk
 typedef struct clerk_t {
@@ -48,77 +41,6 @@ typedef struct customer_t {
     pthread_cond_t cond;
     pthread_mutex_t mutex;
 } customer_t;
-
-// Assistant job structure
-typedef struct assistant_job_t {
-    int product_id;           // Product that needs assistance
-    int clerk_id;             // ID of the clerk requesting assistance
-    pthread_mutex_t* mutex;   // Mutex for synchronization
-    pthread_cond_t* cond;     // Condition variable for signaling
-    int* completed;           // Flag to indicate completion
-} assistant_job_t;
-
-// Global Variables
-queue* clerk_queues[NUM_CLERKS];  // Array of queues, one per clerk
-pthread_mutex_t queue_mutex;      // For atomic queue size checking
-int customers_remaining;          // Track how many customers haven't finished
-pthread_mutex_t customers_mutex;  // Protect the counter
-
-// Assistant variables
-queue* assistant_queue;           // Queue for assistant tasks
-pthread_t assistant_thread_id;    // Assistant thread ID
-int assistant_running = 1;        // Flag to control assistant thread
-
-// Assistant thread function
-void* assistant_thread(void* arg) {
-    #if ENABLE_PRINTING
-    printf("Assistant has entered the shop\n");
-    #endif
-
-    while (1) {
-        // Get a job from the queue
-        void* job_ptr = queue_pop(assistant_queue);
-        
-        // Check if this is the sentinel value signaling to stop
-        if (job_ptr == SENTINEL_VALUE) {
-            break;
-        }
-        
-        assistant_job_t* job = (assistant_job_t*)job_ptr;
-        
-        #if ENABLE_PRINTING
-        printf("Assistant is preparing product %d for clerk %d\n", job->product_id, job->clerk_id);
-        #endif
-        
-        // Simulate work with some math operations
-        double result = 0;
-        for (int i = 0; i < ASSISTANT_WORK_INTENSITY * 100; i++) {
-            result += sin(i) * cos(i);
-            if (i % ASSISTANT_WORK_INTENSITY == 0) {
-                result = fmod(result, 10.0);  // Keep the number manageable
-            }
-        }
-        
-        // Mark job as completed
-        pthread_mutex_lock(job->mutex);
-        *job->completed = 1;
-        pthread_cond_signal(job->cond);
-        pthread_mutex_unlock(job->mutex);
-        
-        #if ENABLE_PRINTING
-        printf("Assistant finished preparing product %d (calculated %f)\n", job->product_id, result);
-        #endif
-        
-        // Free the job structure
-        free(job);
-    }
-    
-    #if ENABLE_PRINTING
-    printf("Assistant is leaving the shop\n");
-    #endif
-    
-    return NULL;
-}
 
 void* customer_thread(void* arg) {
     customer_t* self = (customer_t*)arg;
