@@ -8,20 +8,35 @@
  * throughout the shop simulation system.
  */
 
+/** Number of simulations to run */
+#ifndef NUM_SIMULATIONS
+#define NUM_SIMULATIONS 10 // Any positive integer
+#endif
+
 /** Number of customers in the simulation */
-#define NUM_CUSTOMERS 100 // Any positive integer
+#ifndef NUM_CUSTOMERS
+#define NUM_CUSTOMERS 100 // Any positive integer, larger values may not be compatible with your system
+#endif
 
 /** Number of clerks serving customers */
-#define NUM_CLERKS 3  // Any positive integer
+#ifndef NUM_CLERKS
+#define NUM_CLERKS 3  // Should be less than or equal to the number of customers
+#endif
 
 /** Scales the work needed to prepare a product */
+#ifndef ASSISTANT_WORK_INTENSITY
 #define ASSISTANT_WORK_INTENSITY 100 // Any positive integer
+#endif
 
 /** Controls debug output (1 = enabled, 0 = disabled) */
+#ifndef ENABLE_PRINTING
 #define ENABLE_PRINTING 1 // Set to 0 to disable all print statements
+#endif
 
-/** Controls runtime assertions (1 = enabled, 0 = disabled) */
+/** Controls debug output (1 = enabled, 0 = disabled) */
+#ifndef ENABLE_ASSERTS
 #define ENABLE_ASSERTS 1 // Set to 0 to disable all assert statements
+#endif
 
 /** Special value to signify the end of a queue */
 #define SENTINEL_VALUE ((void*)(-1))

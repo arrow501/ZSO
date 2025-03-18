@@ -64,8 +64,12 @@ void* assistant_thread(void* arg) {
         #endif
         
         // Simulate the work of preparing the product
+        #if ENABLE_ASSERTS || ENABLE_PRINTING
         double result = prepare_product();
-        
+        #else
+        prepare_product();
+        #endif
+
         // Mark job as completed and notify the waiting clerk
         pthread_mutex_lock(job->mutex);
         *job->completed = 1;
