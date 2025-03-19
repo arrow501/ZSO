@@ -13,6 +13,10 @@ extern queue* clerk_queues[];
 
 void* customer_thread(void* arg) {
     customer_t* self = (customer_t*)arg;
+
+    // Initialize new fields
+    self->current_item_index = 0;
+    self->waiting_for_response = false;
     
     #if ENABLE_ASSERTS
     assert(self != NULL);
@@ -46,8 +50,46 @@ void* customer_thread(void* arg) {
     pthread_mutex_unlock(&queue_mutex);
 
     pthread_mutex_lock(&self->mutex);
-
-    // Wait for the clerk to serve me
+    
+    // Wait for clerk to signal they're ready to serve us
+    while (self->current_item_index == 0 && self->waiting_for_response == false) {
+        pthread_cond_wait(&self->cond, &self->mutex);
+    }
+    
+    // Request items one by one
+    for (self->current_item_index = 0; 
+         self->current_item_index < self->shopping_list_size; 
+         self->current_item_index++) {
+         
+        // Request next item
+        self->current_item = self->shopping_list[self->current_item_index];
+        
+        #if ENABLE_PRINTING
+        pthread_mutex_lock(&printf_mutex);
+        printf("Customer %d requesting item %d\n", self->id, self->current_item);
+        pthread_mutex_unlock(&printf_mutex);
+        #endif
+        
+        self->waiting_for_response = true;
+        pthread_cond_signal(&self->cond);
+        
+        // Wait for clerk response
+        while (self->waiting_for_response) {
+            pthread_cond_wait(&self->cond, &self->mutex);
+        }
+        
+        // Add a delay between items to slow things down
+        struct timespec ts;
+        ts.tv_sec = 0;
+        ts.tv_nsec = 10000000; // 10ms
+        nanosleep(&ts, NULL);
+        
+        // Signal clerk we've acknowledged the response
+        self->waiting_for_response = true;
+        pthread_cond_signal(&self->cond);
+    }
+    
+    // Wait for receipt
     while (self->receipt == NULL) {
         pthread_cond_wait(&self->cond, &self->mutex);
     }
