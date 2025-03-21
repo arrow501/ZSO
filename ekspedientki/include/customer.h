@@ -3,6 +3,7 @@
 
 #include <pthread.h>
 #include "transaction.h"
+#include <stdbool.h>
 
 /**
  * Customer Module

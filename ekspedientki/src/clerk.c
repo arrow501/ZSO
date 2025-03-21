@@ -209,7 +209,7 @@ queue* clerk_queues[NUM_CLERKS];  // Array of queues, one per clerk
         #if ENABLE_ASSERTS
         assert(t->total >= 0); // check if the total is correct// check if the total is correct
         assert(t->paid == t->total); // check if the customer paid the correct amount
-        assert(customer_wallet - total == c->wallet); // check if the customer paid the correct amount
+        assert(customer_wallet - t->total == c->wallet); // check if the customer paid the correct amount
         #endif
 
         // Update the cash register

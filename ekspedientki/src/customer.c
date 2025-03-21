@@ -17,6 +17,7 @@ void* customer_thread(void* arg) {
     // Initialize new fields
     self->current_item_index = 0;
     self->waiting_for_response = false;
+    self->clerk_ready = false;  // Initialize the new field
     
     #if ENABLE_ASSERTS
     assert(self != NULL);
@@ -52,7 +53,7 @@ void* customer_thread(void* arg) {
     pthread_mutex_lock(&self->mutex);
     
     // Wait for clerk to signal they're ready to serve us
-    while (self->current_item_index == 0 && self->waiting_for_response == false) {
+    while (!self->clerk_ready) {
         pthread_cond_wait(&self->cond, &self->mutex);
     }
     

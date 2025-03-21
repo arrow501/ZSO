@@ -1,6 +1,8 @@
 {
     "files.associations": {
         "random": "c",
-        "clerk.h": "c"
+        "clerk.h": "c",
+        "customer.h": "c",
+        "stdbool.h": "c"
     }
 }
