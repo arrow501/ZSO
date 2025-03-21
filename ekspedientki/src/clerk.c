@@ -1,5 +1,6 @@
 #include "clerk.h"
 #include "customer.h"
+#include "shop.h"  // Include for deposit_to_safe function
 
 /* Global Variables */
 queue* clerk_queues[NUM_CLERKS];  // Array of queues, one per clerk
@@ -95,6 +96,9 @@ void* clerk_thread(void* arg) {
     printf("Clerk %d has made %d dollars and is leaving the shop\n", self->id, self->cash_register);
     pthread_mutex_unlock(&printf_mutex);
     #endif
+    
+    // Deposit earnings to shop's safe
+    deposit_to_safe(self->cash_register);
     
     free(self);
     return NULL;

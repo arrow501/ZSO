@@ -30,9 +30,20 @@ extern int active_customers;     // Currently active customer threads
 extern int customers_spawned;    // Total customers created so far
 extern int spawner_running;      // Flag to control spawner thread
 
+/* Global variables for shop earnings */
+extern pthread_mutex_t safe_mutex;
+extern int shop_earnings;        // Total earnings collected from all clerks
+
 /**
  * Signal that a customer has left the shop, allowing a new one to be created.
  */
 void signal_customer_exit();
+
+/**
+ * Collects money from a clerk into the shop's safe.
+ * 
+ * @param amount Amount of money to add to the safe
+ */
+void deposit_to_safe(int amount);
 
 #endif /* SHOP_H */

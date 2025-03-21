@@ -22,6 +22,10 @@ int customers_spawned = 0;
 int spawner_running = 1;
 pthread_t spawner_thread_id;
 
+// Global variables for shop earnings
+pthread_mutex_t safe_mutex;
+int shop_earnings = 0;  // Total earnings collected from all clerks
+
 // Function to generate deterministic pseudo-random numbers
 unsigned int get_pseudo_random(unsigned int seed, int min, int max) {
     // Linear Congruential Generator parameters (from glibc)
@@ -34,6 +38,17 @@ unsigned int get_pseudo_random(unsigned int seed, int min, int max) {
 
     // Scale to desired range
     return min + (next % (max - min + 1));
+}
+
+/**
+ * Collects money from a clerk into the shop's safe.
+ * 
+ * @param amount Amount of money to add to the safe
+ */
+void deposit_to_safe(int amount) {
+    pthread_mutex_lock(&safe_mutex);
+    shop_earnings += amount;
+    pthread_mutex_unlock(&safe_mutex);
 }
 
 /**
@@ -200,12 +215,14 @@ int zso() {
     pthread_mutex_init(&customers_mutex, NULL);
     pthread_mutex_init(&printf_mutex, NULL);
     pthread_mutex_init(&spawner_mutex, NULL);
+    pthread_mutex_init(&safe_mutex, NULL);
     pthread_cond_init(&spawner_cond, NULL);
     
     customers_remaining = NUM_CUSTOMERS;
     active_customers = 0;
     customers_spawned = 0;
     spawner_running = 1;
+    shop_earnings = 0;
     
     // Create queues for each clerk
     for (int i = 0; i < NUM_CLERKS; i++) {
@@ -250,6 +267,9 @@ int zso() {
     for (int i = 0; i < NUM_CLERKS; i++) {
         pthread_join(clerks[i], NULL);
     }
+    
+    // Print total earnings
+    printf("The shop made a total of %f dollars during this simulation\n", shop_earnings/100.0f);
 
     // Clean up resources
     for (int i = 0; i < NUM_CLERKS; i++) {
@@ -260,6 +280,7 @@ int zso() {
     pthread_mutex_destroy(&customers_mutex);
     pthread_mutex_destroy(&printf_mutex);
     pthread_mutex_destroy(&spawner_mutex);
+    pthread_mutex_destroy(&safe_mutex);
     pthread_cond_destroy(&spawner_cond);
     
     destroy_products();
