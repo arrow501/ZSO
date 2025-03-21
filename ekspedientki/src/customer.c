@@ -13,6 +13,11 @@ extern queue* clerk_queues[];
 
 void* customer_thread(void* arg) {
     customer_t* self = (customer_t*)arg;
+
+    // Initialize new fields
+    self->current_item_index = 0;
+    self->waiting_for_response = false;
+    self->clerk_ready = false;  // Initialize the new field
     
     #if ENABLE_ASSERTS
     assert(self != NULL);
@@ -46,8 +51,42 @@ void* customer_thread(void* arg) {
     pthread_mutex_unlock(&queue_mutex);
 
     pthread_mutex_lock(&self->mutex);
-
-    // Wait for the clerk to serve me
+    
+    // Wait for clerk to signal they're ready to serve us
+    while (!self->clerk_ready) {
+        pthread_cond_wait(&self->cond, &self->mutex);
+    }
+    
+    // Request items one by one
+    for (self->current_item_index = 0; 
+         self->current_item_index < self->shopping_list_size; 
+         self->current_item_index++) {
+         
+        // Request next item
+        self->current_item = self->shopping_list[self->current_item_index];
+        
+        #if ENABLE_PRINTING
+        pthread_mutex_lock(&printf_mutex);
+        printf("Customer %d requesting item %d\n", self->id, self->current_item);
+        pthread_mutex_unlock(&printf_mutex);
+        #endif
+        
+        // Signal we have a request and wait for response
+        self->waiting_for_response = true;
+        pthread_cond_signal(&self->cond);
+        
+        // Wait for clerk response
+        while (self->waiting_for_response) {
+            pthread_cond_wait(&self->cond, &self->mutex);
+        }
+        
+        // No sleep here, it's not allowed
+        
+        // Signal clerk we're ready for the next item
+        pthread_cond_signal(&self->cond);
+    }
+    
+    // Wait for receipt
     while (self->receipt == NULL) {
         pthread_cond_wait(&self->cond, &self->mutex);
     }
