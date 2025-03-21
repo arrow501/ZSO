@@ -268,8 +268,8 @@ int zso() {
         pthread_join(clerks[i], NULL);
     }
     
-    // Print total earnings
-    printf("The shop made a total of %f dollars during this simulation\n", shop_earnings/100.0f);
+    // Print total earnings (not gated by ENABLE_PRINTING)
+    printf("The shop made a total of %d cents during this simulation\n", shop_earnings);
 
     // Clean up resources
     for (int i = 0; i < NUM_CLERKS; i++) {
