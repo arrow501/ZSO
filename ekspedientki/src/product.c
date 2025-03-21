@@ -1,13 +1,10 @@
 #include "product.h"
-
-
-
+#include "parameters.h"
 
 /* Global Variables*/
 product_t products[MAX_PRODUCTS];
 int num_products = 0;
 pthread_mutex_t inventory_mutex;
-
 
 #define INIT_PRODUCT(pid, pname, pprice, pstock, passist) \
     do                                                \
@@ -15,7 +12,11 @@ pthread_mutex_t inventory_mutex;
         products[pid].id = pid;                       \
         strcpy(products[pid].name, pname);            \
         products[pid].price = pprice;                 \
-        products[pid].stock = pstock;                 \
+        /* Scale stock based on customer count */     \
+        float stock_scale = (float)NUM_CUSTOMERS / 100.0f; \
+        int scaled_stock = (int)(pstock * stock_scale); \
+        /* Ensure minimum stock level */              \
+        products[pid].stock = scaled_stock > pstock ? scaled_stock : pstock; \
         products[pid].needs_assistant = passist;      \
     } while (0)
 
