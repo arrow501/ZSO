@@ -15,7 +15,7 @@ BIN_DIR = bin
 
 SRCS = $(wildcard $(SRC_DIR)/*.c)
 OBJS = $(patsubst $(SRC_DIR)/%.c, $(OBJ_DIR)/%.o, $(SRCS))
-EXEC = $(BIN_DIR)/pthread_app
+EXEC = $(BIN_DIR)/ekspedientki
 
 .PHONY: all clean dirs release debug
 

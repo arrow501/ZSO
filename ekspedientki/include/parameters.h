@@ -15,17 +15,22 @@
 
 /** Number of customers in the simulation */
 #ifndef NUM_CUSTOMERS
-#define NUM_CUSTOMERS 100 // Any positive integer, larger values may not be compatible with your system
+#define NUM_CUSTOMERS 5000 // Any positive integer
+#endif
+
+/* Maximum number of concurrent customers in the shop */
+#ifndef MAX_CONCURRENT_CUSTOMERS
+#define MAX_CONCURRENT_CUSTOMERS 50 // Any positive integer, larger values may not be compatible with your system
 #endif
 
 /** Number of clerks serving customers */
 #ifndef NUM_CLERKS
-#define NUM_CLERKS 3  // Should be less than or equal to the number of customers
+#define NUM_CLERKS 3  // Should be less than or equal to the number of concurent customers
 #endif
 
 /** Scales the work needed to prepare a product */
 #ifndef ASSISTANT_WORK_INTENSITY
-#define ASSISTANT_WORK_INTENSITY 100 // Any positive integer
+#define ASSISTANT_WORK_INTENSITY 10 // Any positive integer
 #endif
 
 /** Controls debug output (1 = enabled, 0 = disabled) */

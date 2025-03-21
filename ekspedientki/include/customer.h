@@ -3,6 +3,7 @@
 
 #include <pthread.h>
 #include "transaction.h"
+#include <stdbool.h>
 
 /**
  * Customer Module
@@ -26,6 +27,12 @@ typedef struct customer_t {
 
     pthread_cond_t cond;         // Condition variable for synchronization
     pthread_mutex_t mutex;       // Mutex for thread safety
+
+    // New fields for item-by-item processing
+    int current_item_index;
+    int current_item;
+    bool waiting_for_response;
+    bool clerk_ready;
 } customer_t;
 
 /**

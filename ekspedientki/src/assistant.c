@@ -2,6 +2,7 @@
 #include "customer.h" // Include for printf_mutex
 #include <stdio.h>
 #include <stdlib.h>
+#include <stdbool.h>
 
 /* Global Variables */
 queue* assistant_queue;           // Queue for assistant tasks
