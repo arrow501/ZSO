@@ -56,7 +56,7 @@ void deposit_to_safe(int amount) {
  * 
  * @param clerks Array to store clerk thread IDs
  */
-void create_clerks(pthread_t clerks[]) {
+int create_clerks(pthread_t clerks[]) {
     // Create clerks
     for (int i = 0; i < NUM_CLERKS; i++) {
         clerk_t* c = (clerk_t*)malloc(sizeof(clerk_t));
@@ -68,12 +68,33 @@ void create_clerks(pthread_t clerks[]) {
         c->cash_register = 0;
         c->customer_queue = clerk_queues[i];
         
-        #if ENABLE_ASSERTS
         int result = pthread_create(&clerks[i], NULL, clerk_thread, c);
-        assert(result == 0);
-        #else
-        pthread_create(&clerks[i], NULL, clerk_thread, c);
-        #endif
+        if (result != 0) {
+            fprintf(stderr, "Error: pthread_create failed for clerk %d with error code %d\n", i, result);
+            free(c);
+            // Clean up resources that were already initialized - special case
+            for (int j = 0; j < i; j++) {
+                pthread_cancel(clerks[j]);
+                pthread_join(clerks[j], NULL);
+        }
+            return 1;
+        }
+    }
+    return 0;
+}
+
+void cleanup_clerks(pthread_t clerks[]){
+    // signal clerks to stop and clean up
+    for (int i = 0; i < NUM_CLERKS; i++) {
+        queue_push(clerk_queues[i], SENTINEL_VALUE);
+    }
+    for (int i = 0; i < NUM_CLERKS; i++) {
+        pthread_join(clerks[i], NULL);
+    }
+
+    // Clean up resources
+    for (int i = 0; i < NUM_CLERKS; i++) {
+        queue_destroy(clerk_queues[i]);
     }
 }
 
@@ -146,8 +167,24 @@ void* customer_spawner_thread(void* arg) {
         }
 
         // Initialize synchronization primitives
-        pthread_cond_init(&c->cond, NULL);
-        pthread_mutex_init(&c->mutex, NULL);
+        int init_result = pthread_cond_init(&c->cond, NULL);
+        if (init_result != 0) {
+            fprintf(stderr, "Error: pthread_cond_init failed with error code %d\n", init_result);
+            free(c->shopping_list);
+            free(c);
+            pthread_mutex_unlock(&spawner_mutex);
+            continue; // Try again later - special case
+        }
+        
+        init_result = pthread_mutex_init(&c->mutex, NULL);
+        if (init_result != 0) {
+            fprintf(stderr, "Error: pthread_mutex_init failed with error code %d\n", init_result);
+            pthread_cond_destroy(&c->cond); // Special case - clean up the previously initialized cond
+            free(c->shopping_list);
+            free(c);
+            pthread_mutex_unlock(&spawner_mutex);
+            continue; // Try again later
+        }
 
         // Create customer thread
         int result = pthread_create(&customers[customer_id], NULL, customer_thread, c);
@@ -200,23 +237,86 @@ void signal_customer_exit() {
     pthread_cond_signal(&spawner_cond);
     pthread_mutex_unlock(&spawner_mutex);
 }
+int initialize_mutexes(){
+    // Initialize mutexes and condition variables with error handling
+    int init_result = 0;
+
+    // Initialize each mutex and check for errors
+    if ((init_result = pthread_mutex_init(&queue_mutex, NULL)) != 0) {
+        fprintf(stderr, "Error: Failed to initialize queue_mutex: %s\n", strerror(init_result));
+        return 1;
+    }
+
+    if ((init_result = pthread_mutex_init(&customers_mutex, NULL)) != 0) {
+        fprintf(stderr, "Error: Failed to initialize customers_mutex: %s\n", strerror(init_result));
+        pthread_mutex_destroy(&queue_mutex);  // Clean up previously initialized mutex
+        return 1;
+    }
+
+    if ((init_result = pthread_mutex_init(&printf_mutex, NULL)) != 0) {
+        fprintf(stderr, "Error: Failed to initialize printf_mutex: %s\n", strerror(init_result));
+        pthread_mutex_destroy(&queue_mutex);
+        pthread_mutex_destroy(&customers_mutex);
+        return 1;
+    }
+
+    if ((init_result = pthread_mutex_init(&spawner_mutex, NULL)) != 0) {
+        fprintf(stderr, "Error: Failed to initialize spawner_mutex: %s\n", strerror(init_result));
+        pthread_mutex_destroy(&queue_mutex);
+        pthread_mutex_destroy(&customers_mutex);
+        pthread_mutex_destroy(&printf_mutex);
+        return 1;
+    }
+
+    if ((init_result = pthread_mutex_init(&safe_mutex, NULL)) != 0) {
+        fprintf(stderr, "Error: Failed to initialize safe_mutex: %s\n", strerror(init_result));
+        pthread_mutex_destroy(&queue_mutex);
+        pthread_mutex_destroy(&customers_mutex);
+        pthread_mutex_destroy(&printf_mutex);
+        pthread_mutex_destroy(&spawner_mutex);
+        return 1;
+    }
+    return 0;
+}
+void cleanup_mutexes(){
+    // Destroy all mutexes 
+    pthread_mutex_destroy(&queue_mutex);
+    pthread_mutex_destroy(&customers_mutex);
+    pthread_mutex_destroy(&printf_mutex);
+    pthread_mutex_destroy(&spawner_mutex);
+    pthread_mutex_destroy(&safe_mutex);
+}
+void cleanup_assistant(){
+    // Signal the assistant to stop and clean up
+    queue_push(assistant_queue, SENTINEL_VALUE);
+    pthread_join(assistant_thread_id, NULL);
+    queue_destroy(assistant_queue);
+}
+
+
 
 /**
  * Modify the zso function to use the customer spawner thread
  */
 int zso() {
+    int init_result;
     pthread_t customers[NUM_CUSTOMERS];
     pthread_t clerks[NUM_CLERKS];
 
     initialize_products();
     
     // Initialize mutexes
-    pthread_mutex_init(&queue_mutex, NULL);
-    pthread_mutex_init(&customers_mutex, NULL);
-    pthread_mutex_init(&printf_mutex, NULL);
-    pthread_mutex_init(&spawner_mutex, NULL);
-    pthread_mutex_init(&safe_mutex, NULL);
-    pthread_cond_init(&spawner_cond, NULL);
+    init_result = initialize_mutexes();
+    if (init_result != 0) {
+        return 1;
+    }
+
+    init_result = pthread_cond_init(&spawner_cond, NULL);
+    if(init_result != 0){
+        fprintf(stderr, "Error: Failed to initialize spawner_cond: %s\n", strerror(init_result));
+        cleanup_mutexes();
+        return 1;
+    }
     
     customers_remaining = NUM_CUSTOMERS;
     active_customers = 0;
@@ -224,20 +324,42 @@ int zso() {
     spawner_running = 1;
     shop_earnings = 0;
     
+    // Create assistant queue and thread
+    assistant_queue = queue_create();
+        init_result = pthread_create(&assistant_thread_id, NULL, assistant_thread, NULL);
+    if (init_result != 0) {
+        fprintf(stderr, "Error: Failed to create assistant thread: %s\n", strerror(init_result));
+        queue_destroy(assistant_queue);
+        pthread_cond_destroy(&spawner_cond);
+        cleanup_mutexes();
+        return 1;
+    }
+
     // Create queues for each clerk
     for (int i = 0; i < NUM_CLERKS; i++) {
         clerk_queues[i] = queue_create();
+        }
+    // Create clerks 
+    init_result = create_clerks(clerks);
+    if (init_result != 0) {
+        fprintf(stderr, "Error: Failed to create clerks\n");
+        pthread_cond_destroy(&spawner_cond);
+        cleanup_mutexes();
+        cleanup_assistant();
+        return 1;
     }
 
-    // Create assistant queue and thread
-    assistant_queue = queue_create();
-    pthread_create(&assistant_thread_id, NULL, assistant_thread, NULL);
-
-    // Create clerks 
-    create_clerks(clerks);
-
     // Create customer spawner thread instead of creating all customers at once
-    pthread_create(&spawner_thread_id, NULL, customer_spawner_thread, customers);
+    init_result = pthread_create(&spawner_thread_id, NULL, customer_spawner_thread, customers);
+    if (init_result != 0) {
+        fprintf(stderr, "Error: Failed to create customer spawner thread: %s\n", strerror(init_result));
+        pthread_cond_destroy(&spawner_cond);
+        cleanup_mutexes();
+        cleanup_assistant();
+        cleanup_clerks(clerks);
+        return 1;
+    }
+
 
     #if ENABLE_PRINTING
     pthread_mutex_lock(&printf_mutex);
@@ -269,18 +391,16 @@ int zso() {
     }
     
     // Print total earnings (not gated by ENABLE_PRINTING)
+    pthread_mutex_lock(&printf_mutex);
     printf("The shop made a total of %d cents during this simulation\n", shop_earnings);
-
+    pthread_mutex_unlock(&printf_mutex);
+    
     // Clean up resources
     for (int i = 0; i < NUM_CLERKS; i++) {
         queue_destroy(clerk_queues[i]);
     }
     queue_destroy(assistant_queue);
-    pthread_mutex_destroy(&queue_mutex);
-    pthread_mutex_destroy(&customers_mutex);
-    pthread_mutex_destroy(&printf_mutex);
-    pthread_mutex_destroy(&spawner_mutex);
-    pthread_mutex_destroy(&safe_mutex);
+    cleanup_mutexes();
     pthread_cond_destroy(&spawner_cond);
     
     destroy_products();
