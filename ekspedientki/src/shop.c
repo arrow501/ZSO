@@ -99,11 +99,27 @@ static bool create_customer(int customer_id, pthread_t* customers) {
     }
     
     // Initialize synchronization primitives
-    pthread_cond_init(&c->cond, NULL);
-    pthread_mutex_init(&c->mutex, NULL);
+    int result = pthread_cond_init(&c->cond, NULL);
+    if (result != 0) {
+        fprintf(stderr, "Error: pthread_cond_init failed for customer %d, error: %d\n", 
+                customer_id, result);
+        free(c->shopping_list);
+        free(c);
+        return false;
+    }
+    
+    result = pthread_mutex_init(&c->mutex, NULL);
+    if (result != 0) {
+        fprintf(stderr, "Error: pthread_mutex_init failed for customer %d, error: %d\n", 
+                customer_id, result);
+        pthread_cond_destroy(&c->cond);
+        free(c->shopping_list);
+        free(c);
+        return false;
+    }
     
     // Create customer thread
-    int result = pthread_create(&customers[customer_id], NULL, customer_thread, c);
+    result = pthread_create(&customers[customer_id], NULL, customer_thread, c);
     if (result != 0) {
         // Creation failed, clean up
         pthread_mutex_destroy(&c->mutex);
@@ -140,10 +156,17 @@ static void create_clerks(pthread_t clerks[]) {
         c->cash_register = 0;
         c->customer_queue = clerk_queues[i];
         
-        if (pthread_create(&clerks[i], NULL, clerk_thread, c) != 0) {
-            fprintf(stderr, "Error: Failed to create clerk thread\n");
+        int result = pthread_create(&clerks[i], NULL, clerk_thread, c);
+        if (result != 0) {
+            fprintf(stderr, "Error: Failed to create clerk thread %d, error: %d\n", i, result);
             exit(1);
         }
+        
+        #if ENABLE_PRINTING
+        pthread_mutex_lock(&printf_mutex);
+        printf("Created clerk thread %d\n", i);
+        pthread_mutex_unlock(&printf_mutex);
+        #endif
     }
 }
 
@@ -256,13 +279,27 @@ int zso() {
     initialize_clerk_inboxes();
     
     // Create assistant thread
-    pthread_create(&assistant_thread_id, NULL, assistant_thread, NULL);
+    int result = pthread_create(&assistant_thread_id, NULL, assistant_thread, NULL);
+    if (result != 0) {
+        fprintf(stderr, "Error: Failed to create assistant thread, error: %d\n", result);
+        exit(1);
+    }
+    
+    #if ENABLE_PRINTING
+    pthread_mutex_lock(&printf_mutex);
+    printf("Created assistant thread\n");
+    pthread_mutex_unlock(&printf_mutex);
+    #endif
     
     // Create clerk threads
     create_clerks(clerks);
     
     // Create customer spawner thread
-    pthread_create(&spawner_thread_id, NULL, customer_spawner_thread, customers);
+    result = pthread_create(&spawner_thread_id, NULL, customer_spawner_thread, customers);
+    if (result != 0) {
+        fprintf(stderr, "Error: Failed to create customer spawner thread, error: %d\n", result);
+        exit(1);
+    }
     
     #if ENABLE_PRINTING
     pthread_mutex_lock(&printf_mutex);
@@ -271,11 +308,19 @@ int zso() {
     #endif
     
     // Join the spawner thread (it will exit when all customers are created)
-    pthread_join(spawner_thread_id, NULL);
+    result = pthread_join(spawner_thread_id, NULL);
+    if (result != 0) {
+        fprintf(stderr, "Error: Failed to join customer spawner thread, error: %d\n", result);
+        exit(1);
+    }
     
     // Join all customer threads
     for (int i = 0; i < customers_spawned; i++) {
-        pthread_join(customers[i], NULL);
+        result = pthread_join(customers[i], NULL);
+        if (result != 0) {
+            fprintf(stderr, "Warning: Failed to join customer thread %d, error: %d\n", i, result);
+            // Not critical, continue execution
+        }
     }
     
     #if ENABLE_PRINTING
@@ -286,11 +331,23 @@ int zso() {
     
     // Signal the assistant to stop and join
     queue_push(assistant_queue, SENTINEL_VALUE);
-    pthread_join(assistant_thread_id, NULL);
+    result = pthread_join(assistant_thread_id, NULL);
+    if (result != 0) {
+        fprintf(stderr, "Error: Failed to join assistant thread, error: %d\n", result);
+        exit(1);
+    }
     
     // Join all clerk threads
     for (int i = 0; i < NUM_CLERKS; i++) {
-        pthread_join(clerks[i], NULL);
+        queue_push(clerk_queues[i], SENTINEL_VALUE);
+    }
+    
+    for (int i = 0; i < NUM_CLERKS; i++) {
+        result = pthread_join(clerks[i], NULL);
+        if (result != 0) {
+            fprintf(stderr, "Error: Failed to join clerk thread %d, error: %d\n", i, result);
+            exit(1);
+        }
     }
     
     // Print total earnings

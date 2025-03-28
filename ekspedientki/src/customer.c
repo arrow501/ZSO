@@ -250,15 +250,23 @@ static void cleanup_resources(customer_t* customer) {
         assert(customer->receipt->items != NULL || customer->receipt->items_size == 0);
     }
     #endif
+    
     #if ENABLE_PRINTING
     int id = customer->id;
     #endif
-
+    
     free(customer->shopping_list);
-    free(customer->receipt->items);
-    free(customer->receipt);
+    
+    if (customer->receipt != NULL) {
+        if (customer->receipt->items != NULL) {
+            free(customer->receipt->items);
+        }
+        free(customer->receipt);
+    }
+    
     pthread_mutex_destroy(&customer->mutex);
     pthread_cond_destroy(&customer->cond);
+    
     free(customer);
     customer = NULL;
         
