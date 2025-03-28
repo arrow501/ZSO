@@ -5,14 +5,29 @@
 /* Global Variables */
 queue* clerk_queues[NUM_CLERKS];  // Array of queues, one per clerk
 
+// Helper functions for condition checking
+static inline bool is_customer_requesting_item(customer_t* customer) {
+    return customer->state == CUSTOMER_REQUESTING_ITEM;
+}
+
+static inline bool is_customer_ready_for_next_item(customer_t* customer) {
+    return (customer->current_item_index < customer->shopping_list_size && 
+            customer->state == CUSTOMER_REQUESTING_ITEM);
+}
+
+static inline bool is_payment_complete(transaction_t* transaction) {
+    return transaction->paid == transaction->total;
+}
+
+static inline bool is_assistant_job_complete(int clerk_id) {
+    return assistant_job_completed[clerk_id];
+}
+
 // Forward declarations of helper functions
 static transaction_t* create_transaction(int shopping_list_size);
-static void process_item_request(clerk_t* clerk, customer_t* customer, transaction_t* transaction, 
-                                pthread_mutex_t* assistant_mutex, pthread_cond_t* assistant_cond);
-static void request_assistant_help(int clerk_id, int product_id, 
-                                  pthread_mutex_t* assistant_mutex, pthread_cond_t* assistant_cond);
+static void process_item_request(clerk_t* clerk, customer_t* customer, transaction_t* transaction);
+static void request_assistant_help(clerk_t* clerk, int product_id);
 static void finalize_transaction(clerk_t* clerk, customer_t* customer, transaction_t* transaction);
-static void cleanup_assistant_resources(pthread_mutex_t* assistant_mutex, pthread_cond_t* assistant_cond);
 
 /**
  * Main function for the clerk thread.
@@ -54,30 +69,16 @@ void* clerk_thread(void* arg) {
         // Setup for item-by-item processing
         pthread_mutex_lock(&customer->mutex);
         
-        // Initialize customer status
-        customer->current_item_index = 0;
-        customer->waiting_for_response = false;
-        customer->clerk_ready = true;
+        // Signal clerk is ready to serve
+        customer->state = CUSTOMER_REQUESTING_ITEM;
         pthread_cond_signal(&customer->cond);
         
         // Create a new transaction for this customer
         transaction_t* transaction = create_transaction(customer->shopping_list_size);
         
-        // Setup synchronization primitives for assistant communication
-        pthread_mutex_t* assistant_mutex = malloc(sizeof(pthread_mutex_t));
-        pthread_cond_t* assistant_cond = malloc(sizeof(pthread_cond_t));
-        
-        if (!assistant_mutex || !assistant_cond) {
-            fprintf(stderr, "Error: malloc failed for synchronization primitives\n");
-            exit(1);
-        }
-        
-        pthread_mutex_init(assistant_mutex, NULL);
-        pthread_cond_init(assistant_cond, NULL);
-        
         // Process all items in the customer's shopping list
         while (customer->current_item_index < customer->shopping_list_size) {
-            process_item_request(self, customer, transaction, assistant_mutex, assistant_cond);
+            process_item_request(self, customer, transaction);
         }
         
         // Complete the transaction and handle payment
@@ -86,9 +87,6 @@ void* clerk_thread(void* arg) {
         // Signal the customer that transaction is fully complete before releasing the mutex
         pthread_cond_signal(&customer->cond);
         pthread_mutex_unlock(&customer->mutex);
-
-        // Clean up assistant synchronization resources
-        cleanup_assistant_resources(assistant_mutex, assistant_cond);
     }
 
     #if ENABLE_PRINTING
@@ -130,10 +128,9 @@ static transaction_t* create_transaction(int shopping_list_size) {
 /**
  * Processes a single item request from the customer
  */
-static void process_item_request(clerk_t* clerk, customer_t* customer, transaction_t* transaction, 
-                               pthread_mutex_t* assistant_mutex, pthread_cond_t* assistant_cond) {
+static void process_item_request(clerk_t* clerk, customer_t* customer, transaction_t* transaction) {
     // Wait for customer to request an item
-    while (!customer->waiting_for_response) {
+    while (!is_customer_requesting_item(customer)) {
         pthread_cond_wait(&customer->cond, &customer->mutex);
     }
     
@@ -155,7 +152,7 @@ static void process_item_request(clerk_t* clerk, customer_t* customer, transacti
         
         // If this product needs assistant preparation
         if (product_needs_assistant(product_id)) {
-            request_assistant_help(clerk->id, product_id, assistant_mutex, assistant_cond);
+            request_assistant_help(clerk, product_id);
         }
     } else {
         #if ENABLE_PRINTING
@@ -166,12 +163,11 @@ static void process_item_request(clerk_t* clerk, customer_t* customer, transacti
     }
     
     // Signal customer we've processed this item
-    customer->waiting_for_response = false;
+    customer->state = CUSTOMER_PROCESSING_RECEIPT;
     pthread_cond_signal(&customer->cond);
     
-    // Wait for customer to acknowledge receipt
-    while (customer->current_item_index < customer->shopping_list_size && 
-          !customer->waiting_for_response) {
+    // Wait for customer to acknowledge and be ready for next item
+    while (!is_customer_ready_for_next_item(customer)) {
         pthread_cond_wait(&customer->cond, &customer->mutex);
     }
 }
@@ -179,11 +175,10 @@ static void process_item_request(clerk_t* clerk, customer_t* customer, transacti
 /**
  * Requests help from the assistant for special products
  */
-static void request_assistant_help(int clerk_id, int product_id, 
-                                 pthread_mutex_t* assistant_mutex, pthread_cond_t* assistant_cond) {
+static void request_assistant_help(clerk_t* clerk, int product_id) {
     #if ENABLE_PRINTING
     pthread_mutex_lock(&printf_mutex);
-    printf("Clerk %d requests assistant for product %d\n", clerk_id, product_id);
+    printf("Clerk %d requests assistant for product %d\n", clerk->id, product_id);
     pthread_mutex_unlock(&printf_mutex);
     #endif
     
@@ -194,32 +189,32 @@ static void request_assistant_help(int clerk_id, int product_id,
         exit(1);
     }
     
-    int completed = 0;
-    
     job->product_id = product_id;
-    job->clerk_id = clerk_id;
-    job->mutex = assistant_mutex;
-    job->cond = assistant_cond;
-    job->completed = &completed;
+    job->clerk_id = clerk->id;
+    
+    // Reset completion status before posting the job
+    pthread_mutex_lock(&assistant_mutex);
+    assistant_job_completed[clerk->id] = 0;
+    pthread_mutex_unlock(&assistant_mutex);
     
     // Add job to assistant queue
     queue_push(assistant_queue, job);
     
     // Wait for assistant to complete
-    pthread_mutex_lock(assistant_mutex);
-    while (!completed) {
+    pthread_mutex_lock(&assistant_mutex);
+    while (!is_assistant_job_complete(clerk->id)) {
         #if ENABLE_PRINTING
         pthread_mutex_lock(&printf_mutex);
-        printf("Clerk %d waiting for assistant to prepare product %d\n", clerk_id, product_id);
+        printf("Clerk %d waiting for assistant to prepare product %d\n", clerk->id, product_id);
         pthread_mutex_unlock(&printf_mutex);
         #endif
-        pthread_cond_wait(assistant_cond, assistant_mutex);
+        pthread_cond_wait(&clerk_cond_vars[clerk->id], &assistant_mutex);
     }
-    pthread_mutex_unlock(assistant_mutex);
+    pthread_mutex_unlock(&assistant_mutex);
     
     #if ENABLE_PRINTING
     pthread_mutex_lock(&printf_mutex);
-    printf("Clerk %d received prepared product %d\n", clerk_id, product_id);
+    printf("Clerk %d received prepared product %d\n", clerk->id, product_id);
     pthread_mutex_unlock(&printf_mutex);
     #endif
 }
@@ -236,7 +231,6 @@ static void finalize_transaction(clerk_t* clerk, customer_t* customer, transacti
     #endif
     
     // Signal customer to pay
-    customer->waiting_for_response = false;
     pthread_cond_signal(&customer->cond);
     
     // Wait for payment
@@ -247,7 +241,7 @@ static void finalize_transaction(clerk_t* clerk, customer_t* customer, transacti
         pthread_mutex_unlock(&printf_mutex);
         #endif
         
-        while (transaction->paid < transaction->total) {
+        while (!is_payment_complete(transaction)) {
             pthread_cond_wait(&customer->cond, &customer->mutex);
         }
     } else {
@@ -275,18 +269,4 @@ static void finalize_transaction(clerk_t* clerk, customer_t* customer, transacti
     printf("Clerk %d has been paid by customer %d\n", clerk->id, customer->id);
     pthread_mutex_unlock(&printf_mutex);
     #endif
-}
-
-/**
- * Cleans up synchronization resources used for assistant communication
- */
-static void cleanup_assistant_resources(pthread_mutex_t* assistant_mutex, pthread_cond_t* assistant_cond) {
-    // Make sure we have the mutex lock before destroying it
-    pthread_mutex_lock(assistant_mutex);
-    pthread_mutex_unlock(assistant_mutex);
-    pthread_mutex_destroy(assistant_mutex);
-    free(assistant_mutex);
-    
-    pthread_cond_destroy(assistant_cond);
-    free(assistant_cond);
 }

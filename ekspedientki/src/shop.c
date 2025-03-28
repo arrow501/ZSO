@@ -122,6 +122,9 @@ void* customer_spawner_thread(void* arg) {
         c->id = customer_id;
         c->wallet = get_pseudo_random(customer_id, 100, 5000); 
         c->receipt = NULL;
+        c->state = CUSTOMER_WAITING_FOR_CLERK;  // Initialize customer state
+        c->current_item_index = 0;
+        c->current_item = -1;  // No item selected yet
 
         // Determine shopping list size (between 2 and 11 items)
         c->shopping_list_size = get_pseudo_random(customer_id, 1, 10);
@@ -217,6 +220,9 @@ int zso() {
     pthread_mutex_init(&spawner_mutex, NULL);
     pthread_mutex_init(&safe_mutex, NULL);
     pthread_cond_init(&spawner_cond, NULL);
+
+    // Initialize assistant synchronization primitives
+    initialize_assistant_sync();
     
     customers_remaining = NUM_CUSTOMERS;
     active_customers = 0;
@@ -282,6 +288,9 @@ int zso() {
     pthread_mutex_destroy(&spawner_mutex);
     pthread_mutex_destroy(&safe_mutex);
     pthread_cond_destroy(&spawner_cond);
+
+    // Clean up
+    cleanup_assistant_sync();
     
     destroy_products();
     return 0;

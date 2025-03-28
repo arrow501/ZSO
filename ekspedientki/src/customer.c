@@ -12,6 +12,19 @@ extern pthread_mutex_t customers_mutex;
 extern int customers_remaining;
 extern queue* clerk_queues[];
 
+// Helper functions for condition checking
+static inline bool is_clerk_ready(customer_t* customer) {
+    return customer->state == CUSTOMER_WAITING_FOR_CLERK;
+}
+
+static inline bool is_item_processed(customer_t* customer) {
+    return customer->state != CUSTOMER_WAITING_FOR_ITEM;
+}
+
+static inline bool is_receipt_ready(customer_t* customer) {
+    return customer->receipt != NULL;
+}
+
 // Forward declarations of helper functions
 static int find_shortest_queue(void);
 static void request_items(customer_t* customer);
@@ -24,10 +37,9 @@ static void cleanup_resources(customer_t* customer);
 void* customer_thread(void* arg) {
     customer_t* self = (customer_t*)arg;
 
-    // Initialize customer status
+    // Initialize customer state
     self->current_item_index = 0;
-    self->waiting_for_response = false;
-    self->clerk_ready = false;
+    self->state = CUSTOMER_WAITING_FOR_CLERK;
     
     #if ENABLE_ASSERTS
     assert(self != NULL);
@@ -51,7 +63,7 @@ void* customer_thread(void* arg) {
     pthread_mutex_lock(&self->mutex);
     
     // Wait for clerk to be ready to serve us
-    while (!self->clerk_ready) {
+    while (!is_clerk_ready(self)) {
         pthread_cond_wait(&self->cond, &self->mutex);
     }
     
@@ -124,20 +136,30 @@ static void request_items(customer_t* customer) {
         
         #if ENABLE_PRINTING
         pthread_mutex_lock(&printf_mutex);
-        printf("Customer %d requesting item %d\n", customer->id, customer->current_item);
+        printf("Customer %d requesting item %d (%d/%d)\n", 
+               customer->id, customer->current_item, 
+               customer->current_item_index + 1, customer->shopping_list_size);
         pthread_mutex_unlock(&printf_mutex);
         #endif
         
-        // Signal the clerk we have a request and wait for response
-        customer->waiting_for_response = true;
+        // Signal the clerk we have a request
+        customer->state = CUSTOMER_REQUESTING_ITEM;
         pthread_cond_signal(&customer->cond);
         
+        // Now waiting for clerk to process our request
+        customer->state = CUSTOMER_WAITING_FOR_ITEM;
+        
         // Wait for clerk to process our request
-        while (customer->waiting_for_response) {
+        while (!is_item_processed(customer)) {
             pthread_cond_wait(&customer->cond, &customer->mutex);
         }
         
-        // Signal we're ready for the next item
+        // If this is not the last item, prepare for requesting the next one
+        if (customer->current_item_index < customer->shopping_list_size - 1) {
+            customer->state = CUSTOMER_REQUESTING_ITEM;
+        }
+        
+        // Signal we're ready for the next item or for concluding the transaction
         pthread_cond_signal(&customer->cond);
     }
 }
@@ -146,23 +168,25 @@ static void request_items(customer_t* customer) {
  * Processes the receipt and makes payment
  */
 static void process_payment(customer_t* customer) {
+    // Set state to processing receipt
+    customer->state = CUSTOMER_PROCESSING_RECEIPT;
+    
     // Wait for receipt from clerk
-    while (customer->receipt == NULL) {
+    while (!is_receipt_ready(customer)) {
         pthread_cond_wait(&customer->cond, &customer->mutex);
     }
 
     #if ENABLE_ASSERTS
-    // Verify receipt is valid
     assert(customer->receipt != NULL);
     assert(customer->receipt->total >= 0);
     #endif
 
     // Make payment
+    customer->state = CUSTOMER_PAYING;
     customer->wallet -= customer->receipt->total;
     customer->receipt->paid = customer->receipt->total;
 
     #if ENABLE_ASSERTS
-    // Verify payment was made correctly
     assert(customer->receipt->paid == customer->receipt->total);
     #endif
 
@@ -176,6 +200,7 @@ static void process_payment(customer_t* customer) {
     pthread_cond_signal(&customer->cond);
 
     // Wait for clerk to confirm receipt of payment
+    customer->state = CUSTOMER_TRANSACTION_COMPLETE;
     pthread_cond_wait(&customer->cond, &customer->mutex);
 }
 

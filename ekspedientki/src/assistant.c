@@ -5,9 +5,35 @@
 #include <stdbool.h>
 
 /* Global Variables */
-queue* assistant_queue;           // Queue for assistant tasks
-pthread_t assistant_thread_id;    // Assistant thread ID
-int assistant_running = 1;        // Flag to control assistant thread
+queue* assistant_queue;                      // Queue for assistant tasks
+pthread_t assistant_thread_id;               // Assistant thread ID
+int assistant_running = 1;                   // Flag to control assistant thread
+pthread_cond_t clerk_cond_vars[NUM_CLERKS];  // Condition variables for clerks
+pthread_mutex_t assistant_mutex;             // Shared mutex for synchronization
+int assistant_job_completed[NUM_CLERKS];     // Job completion status for each clerk
+
+/**
+ * Initialize assistant synchronization primitives.
+ */
+void initialize_assistant_sync(void) {
+    pthread_mutex_init(&assistant_mutex, NULL);
+    
+    for (int i = 0; i < NUM_CLERKS; i++) {
+        pthread_cond_init(&clerk_cond_vars[i], NULL);
+        assistant_job_completed[i] = 0;
+    }
+}
+
+/**
+ * Clean up assistant synchronization primitives.
+ */
+void cleanup_assistant_sync(void) {
+    pthread_mutex_destroy(&assistant_mutex);
+    
+    for (int i = 0; i < NUM_CLERKS; i++) {
+        pthread_cond_destroy(&clerk_cond_vars[i]);
+    }
+}
 
 /**
  * Simulates the work required to prepare a special product.
@@ -57,10 +83,12 @@ void* assistant_thread(void* arg) {
         }
         
         assistant_job_t* job = (assistant_job_t*)job_ptr;
+        int clerk_id = job->clerk_id;
+        int product_id = job->product_id;
         
         #if ENABLE_PRINTING
         pthread_mutex_lock(&printf_mutex);
-        printf("Assistant is preparing product %d for clerk %d\n", job->product_id, job->clerk_id);
+        printf("Assistant is preparing product %d for clerk %d\n", product_id, clerk_id);
         pthread_mutex_unlock(&printf_mutex);
         #endif
         
@@ -72,14 +100,14 @@ void* assistant_thread(void* arg) {
         #endif
 
         // Mark job as completed and notify the waiting clerk
-        pthread_mutex_lock(job->mutex);
-        *job->completed = 1;
-        pthread_cond_signal(job->cond);
-        pthread_mutex_unlock(job->mutex);
+        pthread_mutex_lock(&assistant_mutex);
+        assistant_job_completed[clerk_id] = 1;  // Mark as completed
+        pthread_cond_signal(&clerk_cond_vars[clerk_id]);  // Signal specific clerk
+        pthread_mutex_unlock(&assistant_mutex);
         
         #if ENABLE_PRINTING
         pthread_mutex_lock(&printf_mutex);
-        printf("Assistant finished preparing product %d (calculated %f)\n", job->product_id, result);
+        printf("Assistant finished preparing product %d (calculated %f)\n", product_id, result);
         pthread_mutex_unlock(&printf_mutex);
         #endif
         

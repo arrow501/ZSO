@@ -26,14 +26,19 @@ extern queue* assistant_queue;
 extern pthread_t assistant_thread_id;
 
 /**
+ * Global synchronization primitives for assistant-clerk communication.
+ * Each clerk accesses these arrays using their clerk ID.
+ */
+extern pthread_cond_t clerk_cond_vars[NUM_CLERKS];   // One condition variable per clerk
+extern pthread_mutex_t assistant_mutex;              // Single mutex for all synchronization
+extern int assistant_job_completed[NUM_CLERKS];      // Completion status for each clerk (1 = completed)
+
+/**
  * Represents a job for the assistant to process.
  */
 typedef struct assistant_job_t {
     int product_id;           // Product that needs assistance
     int clerk_id;             // ID of the clerk requesting assistance
-    pthread_mutex_t* mutex;   // Mutex for synchronization
-    pthread_cond_t* cond;     // Condition variable for signaling completion
-    int* completed;           // Flag to indicate completion (1 = completed)
 } assistant_job_t;
 
 /**
@@ -44,5 +49,17 @@ typedef struct assistant_job_t {
  * @return Always returns NULL
  */
 void* assistant_thread(void* arg);
+
+/**
+ * Initialize assistant synchronization primitives.
+ * Must be called once before any clerk or assistant threads start.
+ */
+void initialize_assistant_sync(void);
+
+/**
+ * Clean up assistant synchronization primitives.
+ * Should be called when shutting down the shop.
+ */
+void cleanup_assistant_sync(void);
 
 #endif /* ASSISTANT_H */
