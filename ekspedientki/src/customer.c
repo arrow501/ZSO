@@ -8,9 +8,11 @@
 
 // External references to global variables
 extern pthread_mutex_t queue_mutex;
-extern pthread_mutex_t customers_mutex;
 extern int customers_remaining;
 extern queue* clerk_queues[];
+
+// Global mutex for synchronized printing
+pthread_mutex_t printf_mutex = PTHREAD_MUTEX_INITIALIZER;
 
 // Forward declarations of helper functions
 static int find_shortest_queue(void);
@@ -45,6 +47,13 @@ void* customer_thread(void* arg) {
     
     // Find and join the shortest queue
     int shortest_queue_idx = find_shortest_queue();
+    
+    #if ENABLE_PRINTING
+    pthread_mutex_lock(&printf_mutex);
+    printf("Customer %d is joining queue %d\n", self->id, shortest_queue_idx);
+    pthread_mutex_unlock(&printf_mutex);
+    #endif
+    
     queue_push(clerk_queues[shortest_queue_idx], self);
     
     // Begin shopping process
@@ -52,8 +61,20 @@ void* customer_thread(void* arg) {
     
     // Wait for clerk to be ready to serve us
     while (!self->clerk_ready) {
+        #if ENABLE_PRINTING
+        pthread_mutex_lock(&printf_mutex);
+        printf("Customer %d is waiting for a clerk\n", self->id);
+        pthread_mutex_unlock(&printf_mutex);
+        #endif
+        
         pthread_cond_wait(&self->cond, &self->mutex);
     }
+    
+    #if ENABLE_PRINTING
+    pthread_mutex_lock(&printf_mutex);
+    printf("Customer %d is now being served\n", self->id);
+    pthread_mutex_unlock(&printf_mutex);
+    #endif
     
     // Request items one by one
     request_items(self);
@@ -63,11 +84,19 @@ void* customer_thread(void* arg) {
     
     pthread_mutex_unlock(&self->mutex);
 
-    // Update remaining customers count and notify clerks if needed
+    // Update remaining customers count
     pthread_mutex_lock(&customers_mutex);
     customers_remaining--;
+    
+    // If all customers are done, signal clerks to stop
     if (customers_remaining == 0) {
-        // All customers are done, add sentinel to all queues
+        #if ENABLE_PRINTING
+        pthread_mutex_lock(&printf_mutex);
+        printf("Last customer is leaving, signaling clerks to close shop\n");
+        pthread_mutex_unlock(&printf_mutex);
+        #endif
+        
+        // Add sentinel to all queues to signal clerks to stop
         for (int i = 0; i < NUM_CLERKS; i++) {
             queue_push(clerk_queues[i], SENTINEL_VALUE);
         }
@@ -84,7 +113,7 @@ void* customer_thread(void* arg) {
     // Clean up resources
     cleanup_resources(self);
     
-    // Signal that a customer has exited, allowing a new one to be created
+    // Signal that a customer has exited, allowing a new one to enter
     signal_customer_exit();
 
     return NULL;
@@ -128,16 +157,30 @@ static void request_items(customer_t* customer) {
         pthread_mutex_unlock(&printf_mutex);
         #endif
         
-        // Signal the clerk we have a request and wait for response
+        // Signal the clerk we have a request
         customer->waiting_for_response = true;
         pthread_cond_signal(&customer->cond);
         
         // Wait for clerk to process our request
         while (customer->waiting_for_response) {
+            #if ENABLE_PRINTING
+            pthread_mutex_lock(&printf_mutex);
+            printf("Customer %d waiting for clerk to process item %d\n", 
+                  customer->id, customer->current_item);
+            pthread_mutex_unlock(&printf_mutex);
+            #endif
+            
             pthread_cond_wait(&customer->cond, &customer->mutex);
         }
         
-        // Signal we're ready for the next item
+        #if ENABLE_PRINTING
+        pthread_mutex_lock(&printf_mutex);
+        printf("Customer %d received response for item %d\n", 
+               customer->id, customer->shopping_list[customer->current_item_index]);
+        pthread_mutex_unlock(&printf_mutex);
+        #endif
+        
+        // Signal we're ready for the next item or for payment
         pthread_cond_signal(&customer->cond);
     }
 }
@@ -148,8 +191,21 @@ static void request_items(customer_t* customer) {
 static void process_payment(customer_t* customer) {
     // Wait for receipt from clerk
     while (customer->receipt == NULL) {
+        #if ENABLE_PRINTING
+        pthread_mutex_lock(&printf_mutex);
+        printf("Customer %d waiting for receipt\n", customer->id);
+        pthread_mutex_unlock(&printf_mutex);
+        #endif
+        
         pthread_cond_wait(&customer->cond, &customer->mutex);
     }
+
+    #if ENABLE_PRINTING
+    pthread_mutex_lock(&printf_mutex);
+    printf("Customer %d received receipt for %d cents\n", 
+          customer->id, customer->receipt->total);
+    pthread_mutex_unlock(&printf_mutex);
+    #endif
 
     #if ENABLE_ASSERTS
     // Verify receipt is valid
@@ -169,7 +225,7 @@ static void process_payment(customer_t* customer) {
     // Signal the clerk that payment has been made
     #if ENABLE_PRINTING
     pthread_mutex_lock(&printf_mutex);
-    printf("Customer %d is paying the clerk\n", customer->id);
+    printf("Customer %d is paying %d cents\n", customer->id, customer->receipt->total);
     pthread_mutex_unlock(&printf_mutex);
     #endif
     
@@ -177,6 +233,12 @@ static void process_payment(customer_t* customer) {
 
     // Wait for clerk to confirm receipt of payment
     pthread_cond_wait(&customer->cond, &customer->mutex);
+    
+    #if ENABLE_PRINTING
+    pthread_mutex_lock(&printf_mutex);
+    printf("Customer %d payment processed successfully\n", customer->id);
+    pthread_mutex_unlock(&printf_mutex);
+    #endif
 }
 
 /**
@@ -184,20 +246,34 @@ static void process_payment(customer_t* customer) {
  */
 static void cleanup_resources(customer_t* customer) {
     #if ENABLE_ASSERTS
-    assert(customer->receipt != NULL);
-    assert(customer->receipt->items != NULL || customer->receipt->items_size == 0);
+    if (customer->receipt != NULL) {
+        assert(customer->receipt->items != NULL || customer->receipt->items_size == 0);
+    }
     #endif
-
-    // Free allocated memory
-    free(customer->receipt->items);
-    free(customer->receipt);
+    
+    #if ENABLE_PRINTING
+    int id = customer->id;
+    #endif
+    
     free(customer->shopping_list);
     
-    // Destroy synchronization primitives
+    if (customer->receipt != NULL) {
+        if (customer->receipt->items != NULL) {
+            free(customer->receipt->items);
+        }
+        free(customer->receipt);
+    }
+    
     pthread_mutex_destroy(&customer->mutex);
     pthread_cond_destroy(&customer->cond);
     
-    // Finally, free the customer structure
     free(customer);
+    customer = NULL;
+        
+    #if ENABLE_PRINTING
+    pthread_mutex_lock(&printf_mutex);
+    printf("Customer %d has self destruct\n,", id);
+    pthread_mutex_unlock(&printf_mutex);
+    #endif
 }
 

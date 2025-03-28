@@ -3,6 +3,7 @@
 
 #include <pthread.h>
 #include <math.h>
+#include <stdbool.h>
 
 #include "queue.h"
 #include "parameters.h"
@@ -21,6 +22,11 @@
 extern queue* assistant_queue;
 
 /**
+ * Clerk inbox queues. Each clerk has their own inbox for receiving completed jobs.
+ */
+extern queue** clerk_inboxes;
+
+/**
  * Assistant thread ID.
  */
 extern pthread_t assistant_thread_id;
@@ -31,10 +37,42 @@ extern pthread_t assistant_thread_id;
 typedef struct assistant_job_t {
     int product_id;           // Product that needs assistance
     int clerk_id;             // ID of the clerk requesting assistance
-    pthread_mutex_t* mutex;   // Mutex for synchronization
-    pthread_cond_t* cond;     // Condition variable for signaling completion
-    int* completed;           // Flag to indicate completion (1 = completed)
+    int job_id;               // Unique ID for this job
 } assistant_job_t;
+
+/**
+ * Initialize clerk inboxes. Call this before starting the assistant thread.
+ */
+void initialize_clerk_inboxes();
+
+/**
+ * Clean up clerk inboxes. Call this after all clerks have finished.
+ */
+void cleanup_clerk_inboxes();
+
+/**
+ * Creates a new assistant job.
+ * 
+ * @param product_id ID of the product requiring assistance
+ * @param clerk_id ID of the clerk requesting assistance
+ * @return Pointer to the newly created job
+ */
+assistant_job_t* create_assistant_job(int product_id, int clerk_id);
+
+/**
+ * Wait for all assistant jobs created by this clerk to complete.
+ * 
+ * @param clerk_id ID of the clerk whose jobs to wait for
+ * @param pending_jobs Number of jobs the clerk is waiting for
+ */
+void wait_for_clerk_jobs(int clerk_id, int pending_jobs);
+
+/**
+ * Clean up an assistant job after completion.
+ * 
+ * @param job Pointer to the assistant job
+ */
+void free_assistant_job(assistant_job_t* job);
 
 /**
  * Main function for the assistant thread.
