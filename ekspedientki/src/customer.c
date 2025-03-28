@@ -193,15 +193,28 @@ static void process_payment(customer_t* customer) {
     // Signal the clerk that payment has been made
     #if ENABLE_PRINTING
     pthread_mutex_lock(&printf_mutex);
-    printf("Customer %d is paying the clerk\n", customer->id);
+    if (customer->receipt->total > 0) {
+        printf("Customer %d is paying %d cents to clerk\n", customer->id, customer->receipt->total);
+    } else {
+        printf("Customer %d acknowledges zero-total receipt\n", customer->id);
+    }
     pthread_mutex_unlock(&printf_mutex);
     #endif
     
+    // Signal clerk that payment is complete
     pthread_cond_signal(&customer->cond);
+    
+    // Wait for clerk to confirm transaction completion
+    // IMPORTANT: Don't change the state here - wait for clerk to do it
+    while (customer->state != CUSTOMER_TRANSACTION_COMPLETE) {
+        pthread_cond_wait(&customer->cond, &customer->mutex);
+    }
 
-    // Wait for clerk to confirm receipt of payment
-    customer->state = CUSTOMER_TRANSACTION_COMPLETE;
-    pthread_cond_wait(&customer->cond, &customer->mutex);
+    #if ENABLE_PRINTING
+    pthread_mutex_lock(&printf_mutex);
+    printf("Customer %d transaction completed successfully\n", customer->id);
+    pthread_mutex_unlock(&printf_mutex);
+    #endif
 }
 
 /**

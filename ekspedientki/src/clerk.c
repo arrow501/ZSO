@@ -230,7 +230,7 @@ static void finalize_transaction(clerk_t* clerk, customer_t* customer, transacti
     int customer_wallet = customer->wallet;
     #endif
     
-    // Signal customer to pay
+    // Signal customer that receipt is ready
     pthread_cond_signal(&customer->cond);
     
     // Wait for payment
@@ -241,11 +241,15 @@ static void finalize_transaction(clerk_t* clerk, customer_t* customer, transacti
         pthread_mutex_unlock(&printf_mutex);
         #endif
         
+        // Wait for customer to pay
         while (!is_payment_complete(transaction)) {
             pthread_cond_wait(&customer->cond, &customer->mutex);
         }
     } else {
-        pthread_cond_wait(&customer->cond, &customer->mutex);
+        // For zero-total transactions, still need to wait for customer to reach PAYING state
+        while (customer->state != CUSTOMER_PAYING) {
+            pthread_cond_wait(&customer->cond, &customer->mutex);
+        }
     }
     
     #if ENABLE_PRINTING
@@ -267,6 +271,16 @@ static void finalize_transaction(clerk_t* clerk, customer_t* customer, transacti
     #if ENABLE_PRINTING
     pthread_mutex_lock(&printf_mutex);
     printf("Clerk %d has been paid by customer %d\n", clerk->id, customer->id);
+    pthread_mutex_unlock(&printf_mutex);
+    #endif
+    
+    // IMPORTANT: Set the transaction complete state and explicitly signal
+    customer->state = CUSTOMER_TRANSACTION_COMPLETE;
+    pthread_cond_signal(&customer->cond);
+    
+    #if ENABLE_PRINTING
+    pthread_mutex_lock(&printf_mutex);
+    printf("Clerk %d completed transaction with customer %d\n", clerk->id, customer->id);
     pthread_mutex_unlock(&printf_mutex);
     #endif
 }
