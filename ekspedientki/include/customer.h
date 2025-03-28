@@ -17,7 +17,6 @@
  * Represents a customer shopping in the store.
  */
 typedef struct customer_t {
-    struct customer_t* myself;   // Self-reference for thread safety
     int id;                      // Unique customer identifier
     int wallet;                  // Customer's money in cents
     int* shopping_list;          // Array of product IDs to purchase
@@ -28,11 +27,11 @@ typedef struct customer_t {
     pthread_cond_t cond;         // Condition variable for synchronization
     pthread_mutex_t mutex;       // Mutex for thread safety
 
-    // New fields for item-by-item processing
-    int current_item_index;
-    int current_item;
-    bool waiting_for_response;
-    bool clerk_ready;
+    // Fields for item-by-item processing
+    int current_item_index;      // Index of current item being processed
+    int current_item;            // Current product ID being requested
+    bool waiting_for_response;   // True when waiting for clerk to process an item
+    bool clerk_ready;            // True when a clerk is ready to serve this customer
 } customer_t;
 
 /**
@@ -48,5 +47,8 @@ void* customer_thread(void* arg);
  * Global mutex for synchronizing printf calls.
  */
 extern pthread_mutex_t printf_mutex;
+
+/* Mutex for customers synchronization */
+extern pthread_mutex_t customers_mutex;
 
 #endif /* CUSTOMER_H */

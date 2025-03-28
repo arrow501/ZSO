@@ -2,12 +2,77 @@
 #include "customer.h" // Include for printf_mutex
 #include <stdio.h>
 #include <stdlib.h>
-#include <stdbool.h>
 
 /* Global Variables */
-queue* assistant_queue;           // Queue for assistant tasks
-pthread_t assistant_thread_id;    // Assistant thread ID
-int assistant_running = 1;        // Flag to control assistant thread
+queue* assistant_queue = NULL;        // Queue for assistant tasks
+pthread_t assistant_thread_id;        // Assistant thread ID
+int assistant_running = 1;            // Flag to control assistant thread
+
+/**
+ * Creates a new assistant job with proper initialization.
+ */
+assistant_job_t* create_assistant_job(int product_id, int clerk_id) {
+    assistant_job_t* job = malloc(sizeof(assistant_job_t));
+    if (!job) {
+        fprintf(stderr, "Error: malloc failed for assistant job\n");
+        exit(1);
+    }
+    
+    job->product_id = product_id;
+    job->clerk_id = clerk_id;
+    job->completed = false;
+    
+    // Create synchronization primitives for this job
+    job->mutex = malloc(sizeof(pthread_mutex_t));
+    job->cond = malloc(sizeof(pthread_cond_t));
+    
+    if (!job->mutex || !job->cond) {
+        fprintf(stderr, "Error: malloc failed for synchronization primitives\n");
+        exit(1);
+    }
+    
+    pthread_mutex_init(job->mutex, NULL);
+    pthread_cond_init(job->cond, NULL);
+    
+    return job;
+}
+
+/**
+ * Waits for an assistant job to complete. Uses a descriptive condition.
+ */
+void wait_for_assistant_job(assistant_job_t* job) {
+    pthread_mutex_lock(job->mutex);
+    
+    // Wait until job is marked as completed
+    while (!job->completed) {
+        #if ENABLE_PRINTING
+        pthread_mutex_lock(&printf_mutex);
+        printf("Clerk %d waiting for assistant to prepare product %d\n", job->clerk_id, job->product_id);
+        pthread_mutex_unlock(&printf_mutex);
+        #endif
+        
+        pthread_cond_wait(job->cond, job->mutex);
+    }
+    
+    pthread_mutex_unlock(job->mutex);
+    
+    #if ENABLE_PRINTING
+    pthread_mutex_lock(&printf_mutex);
+    printf("Clerk %d received prepared product %d\n", job->clerk_id, job->product_id);
+    pthread_mutex_unlock(&printf_mutex);
+    #endif
+}
+
+/**
+ * Cleans up resources used by an assistant job.
+ */
+void free_assistant_job(assistant_job_t* job) {
+    pthread_mutex_destroy(job->mutex);
+    pthread_cond_destroy(job->cond);
+    free(job->mutex);
+    free(job->cond);
+    free(job);
+}
 
 /**
  * Simulates the work required to prepare a special product.
@@ -15,7 +80,7 @@ int assistant_running = 1;        // Flag to control assistant thread
  * 
  * @return A dummy result value representing the completed preparation
  */
-double prepare_product() {
+static double prepare_product(void) {
     // Simulate work with some math operations
     double result = 0;
     for (int i = 0; i < ASSISTANT_WORK_INTENSITY * 100; i++) {
@@ -29,14 +94,6 @@ double prepare_product() {
 
 /**
  * Main function for the assistant thread.
- * Continuously processes jobs from the queue until a SENTINEL_VALUE is received.
- * For each job, the assistant:
- * 1. Prepares the product (simulated work)
- * 2. Notifies the clerk that the product is ready
- * 3. Frees the job resources
- * 
- * @param arg Unused, should be NULL
- * @return Always returns NULL
  */
 void* assistant_thread(void* arg) {
     (void)arg; // Suppress unused parameter warning
@@ -73,7 +130,7 @@ void* assistant_thread(void* arg) {
 
         // Mark job as completed and notify the waiting clerk
         pthread_mutex_lock(job->mutex);
-        *job->completed = 1;
+        job->completed = true;
         pthread_cond_signal(job->cond);
         pthread_mutex_unlock(job->mutex);
         
@@ -82,9 +139,6 @@ void* assistant_thread(void* arg) {
         printf("Assistant finished preparing product %d (calculated %f)\n", job->product_id, result);
         pthread_mutex_unlock(&printf_mutex);
         #endif
-        
-        // Free the job structure after completion
-        free(job);
     }
     
     #if ENABLE_PRINTING

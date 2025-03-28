@@ -15,12 +15,12 @@
 
 /** Number of customers in the simulation */
 #ifndef NUM_CUSTOMERS
-#define NUM_CUSTOMERS 5000 // Any positive integer
+#define NUM_CUSTOMERS 20 // Any positive integer
 #endif
 
 /* Maximum number of concurrent customers in the shop */
 #ifndef MAX_CONCURRENT_CUSTOMERS
-#define MAX_CONCURRENT_CUSTOMERS 50 // Any positive integer, larger values may not be compatible with your system
+#define MAX_CONCURRENT_CUSTOMERS 10 // Any positive integer, larger values may not be compatible with your system
 #endif
 
 /** Number of clerks serving customers */
