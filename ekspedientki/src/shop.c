@@ -222,6 +222,9 @@ static void cleanup_resources() {
     }
     queue_destroy(assistant_queue);
     
+    // Clean up clerk inboxes
+    cleanup_clerk_inboxes();
+    
     // Clean up products
     destroy_products();
 }
@@ -248,8 +251,11 @@ int zso() {
         clerk_queues[i] = queue_create();
     }
     
-    // Create assistant queue and thread
+    // Create assistant queue and clerk inboxes
     assistant_queue = queue_create();
+    initialize_clerk_inboxes();
+    
+    // Create assistant thread
     pthread_create(&assistant_thread_id, NULL, assistant_thread, NULL);
     
     // Create clerk threads

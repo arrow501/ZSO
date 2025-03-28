@@ -38,6 +38,7 @@ typedef struct clerk_t {
     int id;                  // Unique ID for the clerk
     int cash_register;       // Amount of money collected
     queue* customer_queue;   // Queue of customers waiting for this clerk
+    int pending_jobs;        // Count of pending assistant jobs
 } clerk_t;
 
 /**

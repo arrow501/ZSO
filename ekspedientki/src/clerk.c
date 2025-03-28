@@ -16,6 +16,9 @@ static void finalize_transaction(clerk_t* clerk, customer_t* customer, transacti
 void* clerk_thread(void* arg) {
     clerk_t* self = (clerk_t*)arg;
     
+    // Initialize pending_jobs counter
+    self->pending_jobs = 0;
+    
     #if ENABLE_PRINTING
     pthread_mutex_lock(&printf_mutex);
     printf("Clerk %d has entered the shop\n", self->id);
@@ -61,6 +64,12 @@ void* clerk_thread(void* arg) {
         bool shopping_complete = false;
         while (!shopping_complete) {
             shopping_complete = process_customer_item(self, customer, transaction);
+        }
+        
+        // Wait for all assistant jobs to complete before finalizing the transaction
+        if (self->pending_jobs > 0) {
+            wait_for_clerk_jobs(self->id, self->pending_jobs);
+            self->pending_jobs = 0; // Reset counter after waiting
         }
         
         // Complete the transaction and handle payment
@@ -143,14 +152,11 @@ static bool process_customer_item(clerk_t* clerk, customer_t* customer, transact
             // Create a new job for the assistant
             assistant_job_t* job = create_assistant_job(product_id, clerk->id);
             
+            // Increment pending jobs counter
+            clerk->pending_jobs++;
+            
             // Add job to assistant queue
             queue_push(assistant_queue, job);
-            
-            // Wait for job to complete
-            wait_for_assistant_job(job);
-            
-            // Clean up job resources
-            free_assistant_job(job);
         }
     } else {
         #if ENABLE_PRINTING
