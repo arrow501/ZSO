@@ -5,7 +5,6 @@
 #include <stdlib.h>
 #include <stdio.h>
 #include <assert.h>
-#include <time.h>  // For nanosleep
 
 // External references to global variables
 extern pthread_mutex_t queue_mutex;
@@ -249,16 +248,14 @@ static void process_payment(customer_t* customer) {
  * Cleans up resources allocated for this customer
  */
 static void cleanup_resources(customer_t* customer) {
-    // We still check if transaction is complete before cleanup
+    // Check if transaction is complete before cleanup
     pthread_mutex_lock(&customer->mutex);
-    if (!customer->transaction_complete) {
-        // This shouldn't happen if our protocol is correct
-        fprintf(stderr, "Warning: Customer %d attempting cleanup before transaction complete\n", 
-                customer->id);
-    }
+    #if ENABLE_ASSERTS
+    assert(customer->transaction_complete && "Customer attempting cleanup before transaction complete");
+    #endif
     pthread_mutex_unlock(&customer->mutex);
     
-    // Don't destroy mutex or condition variable here
+    // Don't destroy mutex or condition variable here to avoid a race condition
     // They will be destroyed in shop.c after all threads join
     
     #if ENABLE_ASSERTS
@@ -266,11 +263,7 @@ static void cleanup_resources(customer_t* customer) {
         assert(customer->receipt->items != NULL || customer->receipt->items_size == 0);
     }
     #endif
-    
-    #if ENABLE_PRINTING
-    int id = customer->id;
-    #endif
-    
+        
     // Free shopping list
     free(customer->shopping_list);
     
@@ -282,13 +275,14 @@ static void cleanup_resources(customer_t* customer) {
         free(customer->receipt);
     }
     
-    // Don't free the customer structure here
+    // Don't free the customer structure here to avoid a race condition
     // It will be freed in shop.c after thread joins
+
     customer = NULL;
         
     #if ENABLE_PRINTING
     pthread_mutex_lock(&printf_mutex);
-    printf("Customer %d has self destruct\n", id);  // Fixed extra comma in format string
+    printf("Customer %d has self destruct\n", customer->id);
     pthread_mutex_unlock(&printf_mutex);
     #endif
 }
