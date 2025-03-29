@@ -228,4 +228,9 @@ static void finalize_transaction(clerk_t* clerk, customer_t* customer, transacti
     
     // Signal customer transaction is complete
     pthread_cond_signal(&customer->cond);
+    
+    // Signal that we're completely done with this customer
+    customer->transaction_complete = 1;
+    // Final signal to wake up customer if it's waiting
+    pthread_cond_signal(&customer->cond);
 }

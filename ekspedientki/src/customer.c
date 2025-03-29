@@ -30,6 +30,7 @@ void* customer_thread(void* arg) {
     self->current_item_index = 0;
     self->waiting_for_response = false;
     self->clerk_ready = false;
+    self->transaction_complete = 0;
     
     #if ENABLE_ASSERTS
     assert(self != NULL);
@@ -231,8 +232,10 @@ static void process_payment(customer_t* customer) {
     
     pthread_cond_signal(&customer->cond);
 
-    // Wait for clerk to confirm receipt of payment
-    pthread_cond_wait(&customer->cond, &customer->mutex);
+    // Wait for clerk to mark transaction as complete
+    while (!customer->receipt->paid || !customer->transaction_complete) {
+        pthread_cond_wait(&customer->cond, &customer->mutex);
+    }
     
     #if ENABLE_PRINTING
     pthread_mutex_lock(&printf_mutex);
@@ -245,6 +248,20 @@ static void process_payment(customer_t* customer) {
  * Cleans up resources allocated for this customer
  */
 static void cleanup_resources(customer_t* customer) {
+    // Ensure we hold the mutex before destroying it
+    pthread_mutex_lock(&customer->mutex);
+    // Double-check the transaction is complete
+    if (!customer->transaction_complete) {
+        // This shouldn't happen if our protocol is correct
+        fprintf(stderr, "Warning: Customer %d attempting cleanup before transaction complete\n", 
+                customer->id);
+    }
+    pthread_mutex_unlock(&customer->mutex);
+    
+    // Now we know no other thread is using the mutex
+    pthread_mutex_destroy(&customer->mutex);
+    pthread_cond_destroy(&customer->cond);
+    
     #if ENABLE_ASSERTS
     if (customer->receipt != NULL) {
         assert(customer->receipt->items != NULL || customer->receipt->items_size == 0);
@@ -263,9 +280,6 @@ static void cleanup_resources(customer_t* customer) {
         }
         free(customer->receipt);
     }
-    
-    pthread_mutex_destroy(&customer->mutex);
-    pthread_cond_destroy(&customer->cond);
     
     free(customer);
     customer = NULL;
