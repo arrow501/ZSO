@@ -259,9 +259,12 @@ if [ -f "./valgrind_logs/massif.log" ]; then
     peak=$(grep -A 1 "Peak heap usage" "./valgrind_logs/massif.log" | tail -1)
     echo -e "${PURPLE}Peak heap usage: ${peak}${NC}"
     
-    # Extract last few memory snapshots to show trend
-    echo -e "${CYAN}Memory usage trend (most recent snapshots):${NC}"
-    grep -A 15 "Detailed snapshots" "./valgrind_logs/massif.log" | head -16 | sed 's/^/  /'
+    # Extract and display the memory usage chart
+    echo -e "${CYAN}Memory usage chart (showing heap allocation over time):${NC}"
+    echo -e "${PURPLE}--------------------------------------------------------------------------------${NC}"
+    # Extract the chart using head and tail to get the right section
+    chart=$(head -30 "./valgrind_logs/massif.log" | tail -25)
+    echo -e "${CYAN}$chart${NC}"
     
     echo -e "${BLUE}📄 Detailed log: ./valgrind_logs/massif.log${NC}"
     echo -e "${BLUE}📊 Raw data: ./valgrind_logs/massif.out${NC}"
