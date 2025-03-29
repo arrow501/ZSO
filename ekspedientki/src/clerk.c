@@ -76,11 +76,10 @@ void* clerk_thread(void* arg) {
         finalize_transaction(self, customer, transaction);
         
         pthread_mutex_unlock(&customer->mutex);
-
-        pthread_mutex_lock(&customer->mutex);
-        customer->clerk_done = true;
-        pthread_cond_signal(&customer->cond);
-        pthread_mutex_unlock(&customer->mutex);
+        
+        // destroy the synchronization primitives here to avoid race conditions
+        pthread_mutex_destroy(&customer->mutex);
+        pthread_cond_destroy(&customer->cond);
     }
 
     #if ENABLE_PRINTING
