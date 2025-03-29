@@ -76,6 +76,11 @@ void* clerk_thread(void* arg) {
         finalize_transaction(self, customer, transaction);
         
         pthread_mutex_unlock(&customer->mutex);
+
+        pthread_mutex_lock(&customer->mutex);
+        customer->clerk_done = true;
+        pthread_cond_signal(&customer->cond);
+        pthread_mutex_unlock(&customer->mutex);
     }
 
     #if ENABLE_PRINTING
@@ -226,7 +231,5 @@ static void finalize_transaction(clerk_t* clerk, customer_t* customer, transacti
     pthread_mutex_unlock(&printf_mutex);
     #endif
     
-    // Signal customer transaction is complete
-    customer->clerk_done = true; // address debian7 race condition
     pthread_cond_signal(&customer->cond);
 }
