@@ -76,10 +76,15 @@ void* clerk_thread(void* arg) {
         finalize_transaction(self, customer, transaction);
         
         pthread_mutex_unlock(&customer->mutex);
-        
-        // destroy the synchronization primitives here to avoid race conditions
-        pthread_mutex_destroy(&customer->mutex);
-        pthread_cond_destroy(&customer->cond);
+
+        // Signal the customer that we're done with them
+        pthread_mutex_lock(&customer->mutex);
+        // Check if customer has started cleanup - if so, don't access further
+        if (!customer->cleanup_started) {
+            customer->clerk_done = true;
+            pthread_cond_signal(&customer->cond);
+        }
+        pthread_mutex_unlock(&customer->mutex);
     }
 
     #if ENABLE_PRINTING
@@ -126,7 +131,16 @@ static transaction_t* create_transaction(int shopping_list_size) {
 static bool process_customer_item(clerk_t* clerk, customer_t* customer, transaction_t* transaction) {
     // Wait until customer is ready with an item request or has finished shopping
     while (!customer->waiting_for_response && customer->current_item_index < customer->shopping_list_size) {
+        // Check if customer has started cleanup, exit early if so
+        if (customer->cleanup_started) {
+            return true;
+        }
         pthread_cond_wait(&customer->cond, &customer->mutex);
+    }
+    
+    // Check again if customer has started cleanup after waiting
+    if (customer->cleanup_started) {
+        return true;
     }
     
     // Check if customer has completed their shopping list
@@ -191,7 +205,7 @@ static void finalize_transaction(clerk_t* clerk, customer_t* customer, transacti
     // Signal customer about receipt and wait for payment
     pthread_cond_signal(&customer->cond);
     
-    // Wait for payment
+    // Wait for payment, but check for customer cleanup
     if (transaction->total > 0) {
         #if ENABLE_PRINTING
         pthread_mutex_lock(&printf_mutex);
@@ -201,11 +215,17 @@ static void finalize_transaction(clerk_t* clerk, customer_t* customer, transacti
         
         // Wait for customer to make payment
         while (transaction->paid < transaction->total) {
+            if (customer->cleanup_started) {
+                break;
+            }
             pthread_cond_wait(&customer->cond, &customer->mutex);
         }
     } else {
         // Even with zero total, wait for customer acknowledgment
-        pthread_cond_wait(&customer->cond, &customer->mutex);
+        // but check for customer cleanup first
+        if (!customer->cleanup_started) {
+            pthread_cond_wait(&customer->cond, &customer->mutex);
+        }
     }
     
     #if ENABLE_PRINTING
@@ -230,5 +250,8 @@ static void finalize_transaction(clerk_t* clerk, customer_t* customer, transacti
     pthread_mutex_unlock(&printf_mutex);
     #endif
     
-    pthread_cond_signal(&customer->cond);
+    // Signal customer only if not in cleanup
+    if (!customer->cleanup_started) {
+        pthread_cond_signal(&customer->cond);
+    }
 }

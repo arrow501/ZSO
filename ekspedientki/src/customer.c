@@ -244,8 +244,18 @@ static void process_payment(customer_t* customer) {
 /**
  * Cleans up resources allocated for this customer
  */
-static void cleanup_resources(customer_t* customer) {  
-    // synchronization primitives freed by the clerk to avoid race conditions
+static void cleanup_resources(customer_t* customer) {
+    // Wait for the clerk to finish processing
+    // and signal that the customer is done
+    pthread_mutex_lock(&customer->mutex);
+    while (!customer->clerk_done) {
+        pthread_cond_wait(&customer->cond, &customer->mutex);
+    }
+    
+    // Set a flag indicating we're about to destroy the mutex
+    customer->cleanup_started = true;
+    
+    pthread_mutex_unlock(&customer->mutex);
 
     #if ENABLE_ASSERTS
     if (customer->receipt != NULL) {
@@ -265,13 +275,16 @@ static void cleanup_resources(customer_t* customer) {
         }
         free(customer->receipt);
     }
+
+    pthread_mutex_destroy(&customer->mutex);
+    pthread_cond_destroy(&customer->cond);
     
     free(customer);
     customer = NULL;
         
     #if ENABLE_PRINTING
     pthread_mutex_lock(&printf_mutex);
-    printf("Customer %d has self destruct\n,", id);
+    printf("Customer %d has self destruct\n", id);
     pthread_mutex_unlock(&printf_mutex);
     #endif
 }
