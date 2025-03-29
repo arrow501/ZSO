@@ -67,7 +67,7 @@ void deposit_to_safe(int amount) {
  * @return true if customer was created successfully, false otherwise
  */
 static bool create_customer(int customer_id, pthread_t* customers) {
-    customer_t* c = (customer_t*)malloc(sizeof(customer_t));
+    customer_t* c = (customer_t*)malloc(sizeof(customer_t)); //race condition here
     if (c == NULL) {
         fprintf(stderr, "Error: malloc failed for customer\n");
         return false;
@@ -198,7 +198,7 @@ void* customer_spawner_thread(void* arg) {
         
         // Create a new customer
         int customer_id = customers_spawned;
-        bool success = create_customer(customer_id, customers);
+        bool success = create_customer(customer_id, customers); // race condition here
         
         if (success) {
             // Increment counters

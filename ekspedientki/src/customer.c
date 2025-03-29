@@ -245,6 +245,8 @@ static void process_payment(customer_t* customer) {
  * Cleans up resources allocated for this customer
  */
 static void cleanup_resources(customer_t* customer) {
+    // Wait for all threads to finish using this customer
+    pthread_mutex_lock(&customer->mutex);
     #if ENABLE_ASSERTS
     if (customer->receipt != NULL) {
         assert(customer->receipt->items != NULL || customer->receipt->items_size == 0);
@@ -263,7 +265,9 @@ static void cleanup_resources(customer_t* customer) {
         }
         free(customer->receipt);
     }
-    
+    // unlock the mutex before destroying it
+    pthread_mutex_unlock(&customer->mutex);
+
     pthread_mutex_destroy(&customer->mutex);
     pthread_cond_destroy(&customer->cond);
     
