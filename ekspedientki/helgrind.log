@@ -1,0 +1,106 @@
+s29379@msh:~/ZSO/ekspedientki$ cat helgrind
+cat: helgrind: No such file or directory
+s29379@msh:~/ZSO/ekspedientki$ cat helgrind.log
+==3253== Helgrind, a thread error detector
+==3253== Copyright (C) 2007-2013, and GNU GPL'd, by OpenWorks LLP et al.
+==3253== Using Valgrind-3.10.0 and LibVEX; rerun with -h for copyright info
+==3253== Command: ./bin/ekspedientki
+==3253== Parent PID: 18979
+==3253==
+==3253== ---Thread-Announcement------------------------------------------
+==3253==
+==3253== Thread #12 was created
+==3253==    at 0x54415EE: clone (clone.S:74)
+==3253==    by 0x5143279: do_clone.constprop.3 (createthread.c:75)
+==3253==    by 0x5144722: create_thread (createthread.c:245)
+==3253==    by 0x5144722: pthread_create@@GLIBC_2.2.5 (pthread_create.c:606)
+==3253==    by 0x4C2EEBD: ??? (in /usr/lib/valgrind/vgpreload_helgrind-amd64-linux.so)
+==3253==    by 0x402D7D: create_customer (shop.c:122)
+==3253==    by 0x402F43: customer_spawner_thread (shop.c:201)
+==3253==    by 0x4C2F056: ??? (in /usr/lib/valgrind/vgpreload_helgrind-amd64-linux.so)
+==3253==    by 0x5144063: start_thread (pthread_create.c:309)
+==3253==
+==3253== ---Thread-Announcement------------------------------------------
+==3253==
+==3253== Thread #5 was created
+==3253==    at 0x54415EE: clone (clone.S:74)
+==3253==    by 0x5143279: do_clone.constprop.3 (createthread.c:75)
+==3253==    by 0x5144722: create_thread (createthread.c:245)
+==3253==    by 0x5144722: pthread_create@@GLIBC_2.2.5 (pthread_create.c:606)
+==3253==    by 0x4C2EEBD: ??? (in /usr/lib/valgrind/vgpreload_helgrind-amd64-linux.so)
+==3253==    by 0x402E79: create_clerks (shop.c:159)
+==3253==    by 0x4030F7: zso (shop.c:295)
+==3253==    by 0x403A09: main (main.c:7)
+==3253==
+==3253== ---Thread-Announcement------------------------------------------
+==3253==
+==3253== Thread #6 was created
+==3253==    at 0x54415EE: clone (clone.S:74)
+==3253==    by 0x5143279: do_clone.constprop.3 (createthread.c:75)
+==3253==    by 0x5144722: create_thread (createthread.c:245)
+==3253==    by 0x5144722: pthread_create@@GLIBC_2.2.5 (pthread_create.c:606)
+==3253==    by 0x4C2EEBD: ??? (in /usr/lib/valgrind/vgpreload_helgrind-amd64-linux.so)
+==3253==    by 0x403115: zso (shop.c:298)
+==3253==    by 0x403A09: main (main.c:7)
+==3253==
+==3253== ----------------------------------------------------------------
+==3253==
+==3253== Possible data race during read of size 1 at 0x5705E10 by thread #12
+==3253== Locks held: none
+==3253==    at 0x4C2CDF9: ??? (in /usr/lib/valgrind/vgpreload_helgrind-amd64-linux.so)
+==3253==    by 0x4C302F1: pthread_mutex_destroy (in /usr/lib/valgrind/vgpreload_helgrind-amd64-linux.so)
+==3253==    by 0x403682: cleanup_resources (customer.c:271)
+==3253==    by 0x403418: customer_thread (customer.c:114)
+==3253==    by 0x4C2F056: ??? (in /usr/lib/valgrind/vgpreload_helgrind-amd64-linux.so)
+==3253==    by 0x5144063: start_thread (pthread_create.c:309)
+==3253==
+==3253== This conflicts with a previous write of size 4 by thread #5
+==3253== Locks held: none
+==3253==    at 0x514A842: __lll_unlock_wake (lowlevellock.S:365)
+==3253==    by 0x51475C8: _L_unlock_554 (pthread_mutex_unlock.c:310)
+==3253==    by 0x5147504: __pthread_mutex_unlock_usercnt (pthread_mutex_unlock.c:57)
+==3253==    by 0x4C30B18: pthread_mutex_unlock (in /usr/lib/valgrind/vgpreload_helgrind-amd64-linux.so)
+==3253==    by 0x400D12: clerk_thread (clerk.c:78)
+==3253==    by 0x4C2F056: ??? (in /usr/lib/valgrind/vgpreload_helgrind-amd64-linux.so)
+==3253==    by 0x5144063: start_thread (pthread_create.c:309)
+==3253==  Address 0x5705e10 is 80 bytes inside a block of size 136 alloc'd
+==3253==    at 0x4C2A040: malloc (in /usr/lib/valgrind/vgpreload_helgrind-amd64-linux.so)
+==3253==    by 0x402B39: create_customer (shop.c:70)
+==3253==    by 0x402F43: customer_spawner_thread (shop.c:201)
+==3253==    by 0x4C2F056: ??? (in /usr/lib/valgrind/vgpreload_helgrind-amd64-linux.so)
+==3253==    by 0x5144063: start_thread (pthread_create.c:309)
+==3253==  Block was alloc'd by thread #6
+==3253==
+==3253== ----------------------------------------------------------------
+==3253==
+==3253== Possible data race during read of size 1 at 0x5705E11 by thread #12
+==3253== Locks held: none
+==3253==    at 0x4C2CE10: ??? (in /usr/lib/valgrind/vgpreload_helgrind-amd64-linux.so)
+==3253==    by 0x4C302F1: pthread_mutex_destroy (in /usr/lib/valgrind/vgpreload_helgrind-amd64-linux.so)
+==3253==    by 0x403682: cleanup_resources (customer.c:271)
+==3253==    by 0x403418: customer_thread (customer.c:114)
+==3253==    by 0x4C2F056: ??? (in /usr/lib/valgrind/vgpreload_helgrind-amd64-linux.so)
+==3253==    by 0x5144063: start_thread (pthread_create.c:309)
+==3253==
+==3253== This conflicts with a previous write of size 4 by thread #5
+==3253== Locks held: none
+==3253==    at 0x514A842: __lll_unlock_wake (lowlevellock.S:365)
+==3253==    by 0x51475C8: _L_unlock_554 (pthread_mutex_unlock.c:310)
+==3253==    by 0x5147504: __pthread_mutex_unlock_usercnt (pthread_mutex_unlock.c:57)
+==3253==    by 0x4C30B18: pthread_mutex_unlock (in /usr/lib/valgrind/vgpreload_helgrind-amd64-linux.so)
+==3253==    by 0x400D12: clerk_thread (clerk.c:78)
+==3253==    by 0x4C2F056: ??? (in /usr/lib/valgrind/vgpreload_helgrind-amd64-linux.so)
+==3253==    by 0x5144063: start_thread (pthread_create.c:309)
+==3253==  Address 0x5705e11 is 81 bytes inside a block of size 136 alloc'd
+==3253==    at 0x4C2A040: malloc (in /usr/lib/valgrind/vgpreload_helgrind-amd64-linux.so)
+==3253==    by 0x402B39: create_customer (shop.c:70)
+==3253==    by 0x402F43: customer_spawner_thread (shop.c:201)
+==3253==    by 0x4C2F056: ??? (in /usr/lib/valgrind/vgpreload_helgrind-amd64-linux.so)
+==3253==    by 0x5144063: start_thread (pthread_create.c:309)
+==3253==  Block was alloc'd by thread #6
+==3253==
+==3253==
+==3253== For counts of detected and suppressed errors, rerun with: -v
+==3253== Use --history-level=approx or =none to gain increased speed, at
+==3253== the cost of reduced accuracy of conflicting-access information
+==3253== ERROR SUMMARY: 721 errors from 2 contexts (suppressed: 2876928 from 101819)
