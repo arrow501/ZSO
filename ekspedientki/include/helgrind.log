@@ -1,0 +1,103 @@
+==15728== Helgrind, a thread error detector
+==15728== Copyright (C) 2007-2013, and GNU GPL'd, by OpenWorks LLP et al.
+==15728== Using Valgrind-3.10.0 and LibVEX; rerun with -h for copyright info
+==15728== Command: ./bin/ekspedientki
+==15728== Parent PID: 18979
+==15728==
+==15728== ---Thread-Announcement------------------------------------------
+==15728==
+==15728== Thread #7 was created
+==15728==    at 0x54415EE: clone (clone.S:74)
+==15728==    by 0x5143279: do_clone.constprop.3 (createthread.c:75)
+==15728==    by 0x5144722: create_thread (createthread.c:245)
+==15728==    by 0x5144722: pthread_create@@GLIBC_2.2.5 (pthread_create.c:606)
+==15728==    by 0x4C2EEBD: ??? (in /usr/lib/valgrind/vgpreload_helgrind-amd64-linux.so)
+==15728==    by 0x402D7D: create_customer (shop.c:122)
+==15728==    by 0x402F41: customer_spawner_thread (shop.c:201)
+==15728==    by 0x4C2F056: ??? (in /usr/lib/valgrind/vgpreload_helgrind-amd64-linux.so)
+==15728==    by 0x5144063: start_thread (pthread_create.c:309)
+==15728==
+==15728== ---Thread-Announcement------------------------------------------
+==15728==
+==15728== Thread #3 was created
+==15728==    at 0x54415EE: clone (clone.S:74)
+==15728==    by 0x5143279: do_clone.constprop.3 (createthread.c:75)
+==15728==    by 0x5144722: create_thread (createthread.c:245)
+==15728==    by 0x5144722: pthread_create@@GLIBC_2.2.5 (pthread_create.c:606)
+==15728==    by 0x4C2EEBD: ??? (in /usr/lib/valgrind/vgpreload_helgrind-amd64-linux.so)
+==15728==    by 0x402E79: create_clerks (shop.c:159)
+==15728==    by 0x4030F5: zso (shop.c:295)
+==15728==    by 0x4039E7: main (main.c:7)
+==15728==
+==15728== ---Thread-Announcement------------------------------------------
+==15728==
+==15728== Thread #6 was created
+==15728==    at 0x54415EE: clone (clone.S:74)
+==15728==    by 0x5143279: do_clone.constprop.3 (createthread.c:75)
+==15728==    by 0x5144722: create_thread (createthread.c:245)
+==15728==    by 0x5144722: pthread_create@@GLIBC_2.2.5 (pthread_create.c:606)
+==15728==    by 0x4C2EEBD: ??? (in /usr/lib/valgrind/vgpreload_helgrind-amd64-linux.so)
+==15728==    by 0x403113: zso (shop.c:298)
+==15728==    by 0x4039E7: main (main.c:7)
+==15728==
+==15728== ----------------------------------------------------------------
+==15728==
+==15728== Possible data race during read of size 1 at 0x5704D70 by thread #7
+==15728== Locks held: none
+==15728==    at 0x4C2CDF9: ??? (in /usr/lib/valgrind/vgpreload_helgrind-amd64-linux.so)
+==15728==    by 0x4C302F1: pthread_mutex_destroy (in /usr/lib/valgrind/vgpreload_helgrind-amd64-linux.so)
+==15728==    by 0x403660: cleanup_resources (customer.c:267)
+==15728==    by 0x403416: customer_thread (customer.c:114)
+==15728==    by 0x4C2F056: ??? (in /usr/lib/valgrind/vgpreload_helgrind-amd64-linux.so)
+==15728==    by 0x5144063: start_thread (pthread_create.c:309)
+==15728==
+==15728== This conflicts with a previous write of size 4 by thread #3
+==15728== Locks held: none
+==15728==    at 0x514A842: __lll_unlock_wake (lowlevellock.S:365)
+==15728==    by 0x51475C8: _L_unlock_554 (pthread_mutex_unlock.c:310)
+==15728==    by 0x5147504: __pthread_mutex_unlock_usercnt (pthread_mutex_unlock.c:57)
+==15728==    by 0x4C30B18: pthread_mutex_unlock (in /usr/lib/valgrind/vgpreload_helgrind-amd64-linux.so)
+==15728==    by 0x400D12: clerk_thread (clerk.c:78)
+==15728==    by 0x4C2F056: ??? (in /usr/lib/valgrind/vgpreload_helgrind-amd64-linux.so)
+==15728==    by 0x5144063: start_thread (pthread_create.c:309)
+==15728==  Address 0x5704d70 is 80 bytes inside a block of size 136 alloc'd
+==15728==    at 0x4C2A040: malloc (in /usr/lib/valgrind/vgpreload_helgrind-amd64-linux.so)
+==15728==    by 0x402B39: create_customer (shop.c:70)
+==15728==    by 0x402F41: customer_spawner_thread (shop.c:201)
+==15728==    by 0x4C2F056: ??? (in /usr/lib/valgrind/vgpreload_helgrind-amd64-linux.so)
+==15728==    by 0x5144063: start_thread (pthread_create.c:309)
+==15728==  Block was alloc'd by thread #6
+==15728==
+==15728== ----------------------------------------------------------------
+==15728==
+==15728== Possible data race during read of size 1 at 0x5704D71 by thread #7
+==15728== Locks held: none
+==15728==    at 0x4C2CE10: ??? (in /usr/lib/valgrind/vgpreload_helgrind-amd64-linux.so)
+==15728==    by 0x4C302F1: pthread_mutex_destroy (in /usr/lib/valgrind/vgpreload_helgrind-amd64-linux.so)
+==15728==    by 0x403660: cleanup_resources (customer.c:267)
+==15728==    by 0x403416: customer_thread (customer.c:114)
+==15728==    by 0x4C2F056: ??? (in /usr/lib/valgrind/vgpreload_helgrind-amd64-linux.so)
+==15728==    by 0x5144063: start_thread (pthread_create.c:309)
+==15728==
+==15728== This conflicts with a previous write of size 4 by thread #3
+==15728== Locks held: none
+==15728==    at 0x514A842: __lll_unlock_wake (lowlevellock.S:365)
+==15728==    by 0x51475C8: _L_unlock_554 (pthread_mutex_unlock.c:310)
+==15728==    by 0x5147504: __pthread_mutex_unlock_usercnt (pthread_mutex_unlock.c:57)
+==15728==    by 0x4C30B18: pthread_mutex_unlock (in /usr/lib/valgrind/vgpreload_helgrind-amd64-linux.so)
+==15728==    by 0x400D12: clerk_thread (clerk.c:78)
+==15728==    by 0x4C2F056: ??? (in /usr/lib/valgrind/vgpreload_helgrind-amd64-linux.so)
+==15728==    by 0x5144063: start_thread (pthread_create.c:309)
+==15728==  Address 0x5704d71 is 81 bytes inside a block of size 136 alloc'd
+==15728==    at 0x4C2A040: malloc (in /usr/lib/valgrind/vgpreload_helgrind-amd64-linux.so)
+==15728==    by 0x402B39: create_customer (shop.c:70)
+==15728==    by 0x402F41: customer_spawner_thread (shop.c:201)
+==15728==    by 0x4C2F056: ??? (in /usr/lib/valgrind/vgpreload_helgrind-amd64-linux.so)
+==15728==    by 0x5144063: start_thread (pthread_create.c:309)
+==15728==  Block was alloc'd by thread #6
+==15728==
+==15728==
+==15728== For counts of detected and suppressed errors, rerun with: -v
+==15728== Use --history-level=approx or =none to gain increased speed, at
+==15728== the cost of reduced accuracy of conflicting-access information
+==15728== ERROR SUMMARY: 3564 errors from 2 contexts (suppressed: 163786 from 6739)
