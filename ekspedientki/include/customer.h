@@ -32,6 +32,8 @@ typedef struct customer_t {
     int current_item;            // Current product ID being requested
     bool waiting_for_response;   // True when waiting for clerk to process an item
     bool clerk_ready;            // True when a clerk is ready to serve this customer
+    // field for finalizing the transaction
+    volatile bool clerk_done; // True when the clerk has finished processing the customer
 } customer_t;
 
 /**

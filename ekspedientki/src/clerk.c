@@ -227,5 +227,6 @@ static void finalize_transaction(clerk_t* clerk, customer_t* customer, transacti
     #endif
     
     // Signal customer transaction is complete
+    customer->clerk_done = true; // address debian7 race condition
     pthread_cond_signal(&customer->cond);
 }

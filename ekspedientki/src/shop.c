@@ -77,6 +77,7 @@ static bool create_customer(int customer_id, pthread_t* customers) {
     c->id = customer_id;
     c->wallet = get_pseudo_random(customer_id, 100, 5000); 
     c->receipt = NULL;
+    c->clerk_done = false;
     
     // Determine shopping list size (between 1 and 10 items)
     c->shopping_list_size = get_pseudo_random(customer_id, 1, 10);
