@@ -277,13 +277,7 @@ static void cleanup_resources(customer_t* customer) {
     
     // Don't free the customer structure here to avoid a race condition
     // It will be freed in shop.c after thread joins
-
-    customer = NULL;
-        
-    #if ENABLE_PRINTING
-    pthread_mutex_lock(&printf_mutex);
-    printf("Customer %d has self destruct\n", customer->id);
-    pthread_mutex_unlock(&printf_mutex);
-    #endif
+    
+    customer = NULL; // Avoid dangling pointer
 }
 
