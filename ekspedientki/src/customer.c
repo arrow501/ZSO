@@ -5,6 +5,7 @@
 #include <stdlib.h>
 #include <stdio.h>
 #include <assert.h>
+#include <time.h>  // For nanosleep
 
 // External references to global variables
 extern pthread_mutex_t queue_mutex;
@@ -257,6 +258,10 @@ static void cleanup_resources(customer_t* customer) {
                 customer->id);
     }
     pthread_mutex_unlock(&customer->mutex);
+    
+    // Add a small delay to ensure mutex unlock operations are complete
+    struct timespec ts = {0, 1000000}; // 1 millisecond
+    nanosleep(&ts, NULL);
     
     // Now we know no other thread is using the mutex
     pthread_mutex_destroy(&customer->mutex);
