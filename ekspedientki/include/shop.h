@@ -40,7 +40,6 @@ extern pthread_mutex_t spawner_mutex;
 extern pthread_cond_t spawner_cond;
 extern int active_customers;     // Currently active customer threads
 extern int customers_spawned;    // Total customers created so far
-extern int spawner_running;      // Flag to control spawner thread
 
 /* Global variables for shop earnings */
 extern pthread_mutex_t safe_mutex;

@@ -18,9 +18,8 @@ pthread_mutex_t customers_mutex = PTHREAD_MUTEX_INITIALIZER;
 pthread_mutex_t spawner_mutex = PTHREAD_MUTEX_INITIALIZER;
 pthread_cond_t spawner_cond = PTHREAD_COND_INITIALIZER;
 int active_customers = 0;             // Currently active customer threads
-int customers_spawned = 0;            // Total customers created so far
-int spawner_running = 1;              // Flag to control spawner thread
-pthread_t spawner_thread_id;
+int customers_spawned = 0;           // Total customers created so far
+pthread_t spawner_thread_id;        // Thread ID for the customer spawner
 
 // Global variables for shop earnings
 pthread_mutex_t safe_mutex = PTHREAD_MUTEX_INITIALIZER;
@@ -188,16 +187,16 @@ void* customer_spawner_thread(void* arg) {
     pthread_mutex_unlock(&printf_mutex);
     #endif
     
-    while (spawner_running) {
+    while (1) {
         pthread_mutex_lock(&spawner_mutex);
         
         // Wait until we have room for another customer
-        while (active_customers >= MAX_CONCURRENT_CUSTOMERS && spawner_running) {
+        while (active_customers >= MAX_CONCURRENT_CUSTOMERS) {
             pthread_cond_wait(&spawner_cond, &spawner_mutex);
         }
         
         // Check if we should exit
-        if (!spawner_running || customers_spawned >= NUM_CUSTOMERS) {
+        if (customers_spawned >= NUM_CUSTOMERS) {
             pthread_mutex_unlock(&spawner_mutex);
             break;
         }
@@ -272,7 +271,6 @@ int zso() {
     customers_remaining = NUM_CUSTOMERS;
     active_customers = 0;
     customers_spawned = 0;
-    spawner_running = 1;
     shop_earnings = 0;
     
     // Create customer records array for tracking customer objects
