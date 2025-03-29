@@ -7,7 +7,7 @@
 #include <pthread.h>
 #include <unistd.h>
 
-#include "customer.h"
+#include "customer.h" // Include customer header for customer_t definition
 
 /**
  * Shop Module

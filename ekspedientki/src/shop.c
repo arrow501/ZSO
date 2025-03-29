@@ -5,7 +5,6 @@
 #include "clerk.h"
 #include "parameters.h"
 #include "transaction.h"
-// #include "customer.h"
 
 /* Global Variables */
 // Mutex for atomic queue operations
