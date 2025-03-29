@@ -5,7 +5,7 @@
 #include "clerk.h"
 #include "parameters.h"
 #include "transaction.h"
-#include "customer.h"
+// #include "customer.h"
 
 /* Global Variables */
 // Mutex for atomic queue operations
@@ -26,6 +26,9 @@ pthread_t spawner_thread_id;
 // Global variables for shop earnings
 pthread_mutex_t safe_mutex = PTHREAD_MUTEX_INITIALIZER;
 int shop_earnings = 0;                // Total earnings collected from all clerks
+
+// Customer records array for tracking customer objects
+customer_record_t* customer_records = NULL;
 
 /**
  * Generates deterministic pseudo-random numbers.
@@ -135,6 +138,10 @@ static bool create_customer(int customer_id, pthread_t* customers) {
         
         return false;
     }
+    
+    // Store reference to customer for later cleanup
+    customer_records[customer_id].customer = c;
+    customer_records[customer_id].thread_id = customers[customer_id];
     
     return true;
 }
@@ -269,6 +276,19 @@ int zso() {
     spawner_running = 1;
     shop_earnings = 0;
     
+    // Create customer records array for tracking customer objects
+    customer_records = malloc(sizeof(customer_record_t) * NUM_CUSTOMERS);
+    if (customer_records == NULL) {
+        fprintf(stderr, "Error: malloc failed for customer records\n");
+        exit(1);
+    }
+    
+    // Initialize the array
+    for (int i = 0; i < NUM_CUSTOMERS; i++) {
+        customer_records[i].customer = NULL;
+        customer_records[i].thread_id = 0;
+    }
+    
     // Create queues for each clerk
     for (int i = 0; i < NUM_CLERKS; i++) {
         clerk_queues[i] = queue_create();
@@ -353,7 +373,26 @@ int zso() {
     // Print total earnings
     printf("The shop made a total of %d cents during this simulation\n", shop_earnings);
     
-    // Clean up resources
+    // Clean up customer resources now that all threads are joined
+    for (int i = 0; i < customers_spawned; i++) {
+        if (customer_records[i].customer != NULL) {
+            customer_t* customer = customer_records[i].customer;
+            
+            // Now it's safe to destroy mutex and condition variable
+            pthread_mutex_destroy(&customer->mutex);
+            pthread_cond_destroy(&customer->cond);
+            
+            // Free the customer structure
+            free(customer);
+            customer_records[i].customer = NULL;
+        }
+    }
+    
+    // Free the customer records array
+    free(customer_records);
+    customer_records = NULL;
+    
+    // Clean up other resources
     cleanup_resources();
     
     return 0;

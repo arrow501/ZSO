@@ -7,6 +7,8 @@
 #include <pthread.h>
 #include <unistd.h>
 
+#include "customer.h"
+
 /**
  * Shop Module
  * 
@@ -14,6 +16,16 @@
  * coordinating customers, clerks, and assistant interactions
  * in a multi-threaded environment.
  */
+
+
+// Structure to track customer objects for safe cleanup
+typedef struct {
+    customer_t* customer;
+    pthread_t thread_id;
+} customer_record_t;
+
+// Global array to track all customer objects
+extern customer_record_t* customer_records;
 
 /**
  * Main shop simulation function.

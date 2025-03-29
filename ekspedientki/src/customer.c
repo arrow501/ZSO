@@ -249,9 +249,8 @@ static void process_payment(customer_t* customer) {
  * Cleans up resources allocated for this customer
  */
 static void cleanup_resources(customer_t* customer) {
-    // Ensure we hold the mutex before destroying it
+    // We still check if transaction is complete before cleanup
     pthread_mutex_lock(&customer->mutex);
-    // Double-check the transaction is complete
     if (!customer->transaction_complete) {
         // This shouldn't happen if our protocol is correct
         fprintf(stderr, "Warning: Customer %d attempting cleanup before transaction complete\n", 
@@ -259,13 +258,8 @@ static void cleanup_resources(customer_t* customer) {
     }
     pthread_mutex_unlock(&customer->mutex);
     
-    // Add a small delay to ensure mutex unlock operations are complete
-    struct timespec ts = {0, 1000000}; // 1 millisecond
-    nanosleep(&ts, NULL);
-    
-    // Now we know no other thread is using the mutex
-    pthread_mutex_destroy(&customer->mutex);
-    pthread_cond_destroy(&customer->cond);
+    // Don't destroy mutex or condition variable here
+    // They will be destroyed in shop.c after all threads join
     
     #if ENABLE_ASSERTS
     if (customer->receipt != NULL) {
@@ -277,8 +271,10 @@ static void cleanup_resources(customer_t* customer) {
     int id = customer->id;
     #endif
     
+    // Free shopping list
     free(customer->shopping_list);
     
+    // Free receipt if it exists
     if (customer->receipt != NULL) {
         if (customer->receipt->items != NULL) {
             free(customer->receipt->items);
@@ -286,12 +282,13 @@ static void cleanup_resources(customer_t* customer) {
         free(customer->receipt);
     }
     
-    free(customer);
+    // Don't free the customer structure here
+    // It will be freed in shop.c after thread joins
     customer = NULL;
         
     #if ENABLE_PRINTING
     pthread_mutex_lock(&printf_mutex);
-    printf("Customer %d has self destruct\n,", id);
+    printf("Customer %d has self destruct\n", id);  // Fixed extra comma in format string
     pthread_mutex_unlock(&printf_mutex);
     #endif
 }
