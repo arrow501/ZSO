@@ -10,12 +10,12 @@
 
 /** Number of simulations to run */
 #ifndef NUM_SIMULATIONS
-#define NUM_SIMULATIONS 3 // Any positive integer
+#define NUM_SIMULATIONS 10 // Any positive integer
 #endif
 
 /** Number of customers in the simulation */
 #ifndef NUM_CUSTOMERS
-#define NUM_CUSTOMERS 100 // Any positive integer
+#define NUM_CUSTOMERS 100 // Any positive integer, tested up to 10000
 #endif
 
 /* Maximum number of concurrent customers in the shop */
@@ -25,12 +25,12 @@
 
 /** Number of clerks serving customers */
 #ifndef NUM_CLERKS
-#define NUM_CLERKS 3  // Should be less than or equal to the number of concurent customers
+#define NUM_CLERKS 3  // Should be less than or equal to the number of concurent customers, tested up to 3
 #endif
 
 /** Scales the work needed to prepare a product */
 #ifndef ASSISTANT_WORK_INTENSITY
-#define ASSISTANT_WORK_INTENSITY 10 // Any positive integer
+#define ASSISTANT_WORK_INTENSITY 10 // Any positive integer, tested up to 10000
 #endif
 
 /** Controls debug output (1 = enabled, 0 = disabled) */

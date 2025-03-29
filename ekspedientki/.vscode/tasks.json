@@ -12,6 +12,20 @@
             "problemMatcher": ["$gcc"]
         },
         {
+            "label": "build debug",
+            "type": "shell",
+            "command": "make debug",
+            "group": "build",
+            "problemMatcher": ["$gcc"]
+        },
+        {
+            "label": "build release",
+            "type": "shell",
+            "command": "make release",
+            "group": "build",
+            "problemMatcher": ["$gcc"]
+        },
+        {
             "label": "clean",
             "type": "shell",
             "command": "make clean",

@@ -7,6 +7,8 @@
 #include <pthread.h>
 #include <unistd.h>
 
+#include "customer.h" // Include customer header for customer_t definition
+
 /**
  * Shop Module
  * 
@@ -14,6 +16,16 @@
  * coordinating customers, clerks, and assistant interactions
  * in a multi-threaded environment.
  */
+
+
+// Structure to track customer objects for safe cleanup
+typedef struct {
+    customer_t* customer;
+    pthread_t thread_id;
+} customer_record_t;
+
+// Global array to track all customer objects
+extern customer_record_t* customer_records;
 
 /**
  * Main shop simulation function.
@@ -28,7 +40,6 @@ extern pthread_mutex_t spawner_mutex;
 extern pthread_cond_t spawner_cond;
 extern int active_customers;     // Currently active customer threads
 extern int customers_spawned;    // Total customers created so far
-extern int spawner_running;      // Flag to control spawner thread
 
 /* Global variables for shop earnings */
 extern pthread_mutex_t safe_mutex;

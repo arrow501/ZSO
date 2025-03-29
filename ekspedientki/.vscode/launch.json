@@ -5,7 +5,7 @@
             "name": "Debug",
             "type": "cppdbg",
             "request": "launch",
-            "program": "${workspaceFolder}/bin/pthread_app",
+            "program": "${workspaceFolder}/bin/ekspedientki",
             "args": [],
             "stopAtEntry": false,
             "cwd": "${workspaceFolder}",

@@ -30,6 +30,7 @@ void* customer_thread(void* arg) {
     self->current_item_index = 0;
     self->waiting_for_response = false;
     self->clerk_ready = false;
+    self->transaction_complete = 0;
     
     #if ENABLE_ASSERTS
     assert(self != NULL);
@@ -231,8 +232,10 @@ static void process_payment(customer_t* customer) {
     
     pthread_cond_signal(&customer->cond);
 
-    // Wait for clerk to confirm receipt of payment
-    pthread_cond_wait(&customer->cond, &customer->mutex);
+    // Wait for clerk to mark transaction as complete
+    while (!customer->receipt->paid || !customer->transaction_complete) {
+        pthread_cond_wait(&customer->cond, &customer->mutex);
+    }
     
     #if ENABLE_PRINTING
     pthread_mutex_lock(&printf_mutex);
@@ -245,18 +248,26 @@ static void process_payment(customer_t* customer) {
  * Cleans up resources allocated for this customer
  */
 static void cleanup_resources(customer_t* customer) {
+    // Check if transaction is complete before cleanup
+    pthread_mutex_lock(&customer->mutex);
+    #if ENABLE_ASSERTS
+    assert(customer->transaction_complete && "Customer attempting cleanup before transaction complete");
+    #endif
+    pthread_mutex_unlock(&customer->mutex);
+    
+    // Don't destroy mutex or condition variable here to avoid a race condition
+    // They will be destroyed in shop.c after all threads join
+    
     #if ENABLE_ASSERTS
     if (customer->receipt != NULL) {
         assert(customer->receipt->items != NULL || customer->receipt->items_size == 0);
     }
     #endif
-    
-    #if ENABLE_PRINTING
-    int id = customer->id;
-    #endif
-    
+        
+    // Free shopping list
     free(customer->shopping_list);
     
+    // Free receipt if it exists
     if (customer->receipt != NULL) {
         if (customer->receipt->items != NULL) {
             free(customer->receipt->items);
@@ -264,16 +275,9 @@ static void cleanup_resources(customer_t* customer) {
         free(customer->receipt);
     }
     
-    pthread_mutex_destroy(&customer->mutex);
-    pthread_cond_destroy(&customer->cond);
+    // Don't free the customer structure here to avoid a race condition
+    // It will be freed in shop.c after thread joins
     
-    free(customer);
-    customer = NULL;
-        
-    #if ENABLE_PRINTING
-    pthread_mutex_lock(&printf_mutex);
-    printf("Customer %d has self destruct\n,", id);
-    pthread_mutex_unlock(&printf_mutex);
-    #endif
+    customer = NULL; // Avoid dangling pointer
 }
 
