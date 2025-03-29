@@ -10,12 +10,12 @@
 
 /** Number of simulations to run */
 #ifndef NUM_SIMULATIONS
-#define NUM_SIMULATIONS 10 // Any positive integer
+#define NUM_SIMULATIONS 3 // Any positive integer
 #endif
 
 /** Number of customers in the simulation */
 #ifndef NUM_CUSTOMERS
-#define NUM_CUSTOMERS 500 // Any positive integer
+#define NUM_CUSTOMERS 100 // Any positive integer
 #endif
 
 /* Maximum number of concurrent customers in the shop */
