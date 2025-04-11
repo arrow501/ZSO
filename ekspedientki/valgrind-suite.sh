@@ -1,19 +1,26 @@
 #!/bin/bash
 
 # Enhanced Valgrind Analysis Suite
+# Version 1.0.0
 # 
-# MIT Zero Clause License (ZCL)
+# MIT-0 License
 # 
-# Permission to use, copy, modify, and/or distribute this software for any
-# purpose with or without fee is hereby granted.
+# Copyright (c) 2025 Arrow
 # 
-# THE SOFTWARE IS PROVIDED "AS IS" AND THE AUTHOR DISCLAIMS ALL WARRANTIES
-# WITH REGARD TO THIS SOFTWARE INCLUDING ALL IMPLIED WARRANTIES OF
-# MERCHANTABILITY AND FITNESS. IN NO EVENT SHALL THE AUTHOR BE LIABLE FOR
-# ANY SPECIAL, DIRECT, INDIRECT, OR CONSEQUENTIAL DAMAGES OR ANY DAMAGES
-# WHATSOEVER RESULTING FROM LOSS OF USE, DATA OR PROFITS, WHETHER IN AN
-# ACTION OF CONTRACT, NEGLIGENCE OR OTHER TORTIOUS ACTION, ARISING OUT OF
-# OR IN CONNECTION WITH THE USE OR PERFORMANCE OF THIS SOFTWARE.
+# Permission is hereby granted, free of charge, to any person obtaining a copy
+# of this software and associated documentation files (the "Software"), to deal
+# in the Software without restriction, including without limitation the rights
+# to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
+# copies of the Software, and to permit persons to whom the Software is
+# furnished to do so.
+# 
+# THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+# IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+# FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
+# AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
+# LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
+# OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
+# SOFTWARE.
 
 # Define colors for better readability
 GREEN='\033[0;32m'
@@ -25,8 +32,10 @@ CYAN='\033[0;36m'
 BOLD='\033[1m'
 NC='\033[0m' # No Color
 
-# Default program path
-PROGRAM="./bin/ekspedientki"
+# Default program path is empty (must be specified)
+PROGRAM=""
+# Program arguments (empty by default)
+PROG_ARGS=""
 
 # Create logs directory if it doesn't exist
 mkdir -p ./valgrind_logs
@@ -39,11 +48,12 @@ show_help() {
     echo -e "saves the results to log files, and provides a detailed summary."
     echo ""
     echo -e "${BOLD}Usage:${NC}"
-    echo -e "  $0 [OPTIONS]"
+    echo -e "  $0 -p PROGRAM [OPTIONS]"
     echo ""
     echo -e "${BOLD}Options:${NC}"
     echo -e "  -h, --help            Display this help message"
-    echo -e "  -p, --program PATH    Specify the path to the program to analyze (default: $PROGRAM)"
+    echo -e "  -p, --program PATH    Specify the path to the program to analyze (required)"
+    echo -e "  -a, --args \"ARGS\"     Optional arguments to pass to the analyzed program (use quotes)"
     echo ""
     echo -e "${BOLD}Tools Used:${NC}"
     echo -e "  - Memcheck: Memory error detector"
@@ -57,10 +67,15 @@ show_help() {
     echo -e "  All logs and output files are saved to the ./valgrind_logs/ directory."
     echo -e "  A summary of findings is displayed after all tools have completed."
     echo ""
+    echo -e "${BOLD}Examples:${NC}"
+    echo -e "  $0 -p ./my_program"
+    echo -e "  $0 -p ./my_program -a \"arg1 arg2\""
+    echo ""
     echo -e "${BOLD}License:${NC}"
     echo -e "  MIT Zero Clause License (ZCL) - Free for any use."
     exit 0
 }
+
 
 # Parse command line arguments
 while [[ $# -gt 0 ]]; do
@@ -72,6 +87,10 @@ while [[ $# -gt 0 ]]; do
             PROGRAM="$2"
             shift 2
             ;;
+        -a|--args)
+            PROG_ARGS="$2"
+            shift 2
+            ;;
         *)
             echo -e "${RED}Unknown option: $1${NC}"
             echo -e "Use --help to see available options."
@@ -79,6 +98,14 @@ while [[ $# -gt 0 ]]; do
             ;;
     esac
 done
+
+# Check if a program was specified
+if [ -z "$PROGRAM" ]; then
+    echo -e "${RED}Error: No program specified!${NC}"
+    echo -e "Use -p or --program to specify the program to analyze."
+    echo -e "Example: $0 -p ./my_program"
+    exit 1
+fi
 
 # Check if the program exists
 if [ ! -f "$PROGRAM" ]; then
@@ -88,6 +115,9 @@ fi
 
 echo -e "${BOLD}===============================================${NC}"
 echo -e "${BOLD}Running Comprehensive Valgrind Suite on ${CYAN}$PROGRAM${NC}${BOLD}...${NC}"
+if [ ! -z "$PROG_ARGS" ]; then
+    echo -e "${BOLD}Program arguments: ${CYAN}$PROG_ARGS${NC}"
+fi
 echo -e "${BOLD}===============================================${NC}"
 
 # Function to run a tool and save its output
@@ -103,7 +133,12 @@ run_tool() {
     echo -e "${BLUE}Log will be saved to: ${log_file}${NC}"
     
     # This captures both stdout and stderr to the log file
-    valgrind --tool=$tool $options "$PROGRAM" > "$log_file" 2>&1
+    if [ -z "$PROG_ARGS" ]; then
+        valgrind --tool=$tool $options "$PROGRAM" > "$log_file" 2>&1
+    else
+        # shellcheck disable=SC2086
+        valgrind --tool=$tool $options "$PROGRAM" $PROG_ARGS > "$log_file" 2>&1
+    fi
     
     echo -e "${GREEN}✓ ${display_name} analysis completed${NC}"
 }
@@ -128,9 +163,16 @@ echo -e "\n${YELLOW}Running ${BOLD}Massif${NC}${YELLOW}...${NC}"
 echo -e "${BLUE}Options: --detailed-freq=10 --threshold=0.1${NC}"
 echo -e "${BLUE}Output will be saved to: ./valgrind_logs/massif.out${NC}"
 
-valgrind --tool=massif --detailed-freq=10 --threshold=0.1 \
-    --massif-out-file="./valgrind_logs/massif.out" \
-    "$PROGRAM" > "./valgrind_logs/massif_run.log" 2>&1
+if [ -z "$PROG_ARGS" ]; then
+    valgrind --tool=massif --detailed-freq=10 --threshold=0.1 \
+        --massif-out-file="./valgrind_logs/massif.out" \
+        "$PROGRAM" > "./valgrind_logs/massif_run.log" 2>&1
+else
+    # shellcheck disable=SC2086
+    valgrind --tool=massif --detailed-freq=10 --threshold=0.1 \
+        --massif-out-file="./valgrind_logs/massif.out" \
+        "$PROGRAM" $PROG_ARGS > "./valgrind_logs/massif_run.log" 2>&1
+fi
 
 # Generate human-readable output from massif.out
 ms_print "./valgrind_logs/massif.out" > "./valgrind_logs/massif.log"
