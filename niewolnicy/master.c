@@ -10,6 +10,8 @@
 #include <errno.h>
 #include <pthread.h>
 #include <semaphore.h>
+#include <time.h>
+#include <poll.h>
 #include "parameters.h"
 #include "message.h"
 #include "stats.h"
@@ -21,11 +23,45 @@ typedef struct {
 } slave_info_t;
 
 static slave_info_t slaves[MAX_SLAVES];
-static int master_fd;
-static stats_t *stats;
-static sem_t *stats_sem;
+static int master_fd = -1;
+static stats_t *stats = NULL;
+static sem_t *stats_sem = SEM_FAILED;
 static volatile int should_exit = 0;
 static volatile int show_stats = 0;
+
+static void cleanup_resources() {
+    // Zamknij połączenia ze slave'ami
+    for (int i = 0; i < MAX_SLAVES; i++) {
+        if (slaves[i].fd >= 0) {
+            close(slaves[i].fd);
+            slaves[i].fd = -1;
+        }
+    }
+    
+    // Zamknij master FIFO
+    if (master_fd >= 0) {
+        close(master_fd);
+        master_fd = -1;
+    }
+    
+    // Usuń FIFO mastera
+    unlink(MASTER_FIFO);
+    
+    // Cleanup shared memory
+    if (stats != NULL) {
+        pthread_mutex_destroy(&stats->mutex);
+        munmap(stats, sizeof(stats_t));
+        stats = NULL;
+    }
+    shm_unlink(SHM_NAME);
+    
+    // Cleanup semaphore
+    if (stats_sem != SEM_FAILED) {
+        sem_close(stats_sem);
+        stats_sem = SEM_FAILED;
+    }
+    sem_unlink(SEM_NAME);
+}
 
 static void signal_handler(int sig) {
     if (sig == SIGINT || sig == SIGTERM) {
@@ -36,6 +72,10 @@ static void signal_handler(int sig) {
 }
 
 static int init_shared_memory() {
+    // Cleanup old resources first
+    shm_unlink(SHM_NAME);
+    sem_unlink(SEM_NAME);
+    
     // Utworzenie pamięci dzielonej
     int shm_fd = shm_open(SHM_NAME, O_CREAT | O_RDWR, 0666);
     if (shm_fd < 0) {
@@ -84,24 +124,17 @@ static int init_shared_memory() {
     return 0;
 }
 
-static void cleanup_shared_memory() {
-    if (stats != NULL) {
-        pthread_mutex_destroy(&stats->mutex);
-        munmap(stats, sizeof(stats_t));
-        shm_unlink(SHM_NAME);
-    }
-    
-    if (stats_sem != SEM_FAILED) {
-        sem_close(stats_sem);
-        sem_unlink(SEM_NAME);
-    }
-}
-
 static void handle_register(message_t *msg) {
     int id = msg->slave_id;
     
     if (id < 0 || id >= MAX_SLAVES) {
+        fprintf(stderr, "Invalid slave_id in register: %d\n", id);
         return;
+    }
+    
+    // Jeśli już jest zarejestrowany, zamknij stare połączenie
+    if (slaves[id].fd >= 0) {
+        close(slaves[id].fd);
     }
     
     // Otwórz FIFO slave'a
@@ -118,19 +151,21 @@ static void handle_register(message_t *msg) {
     slaves[id].active = 1;
     
     #if ENABLE_PRINTING
-    printf("Master: Registered slave %d\n", id);
+    printf("Master: Registered slave %d (fd=%d)\n", id, fd);
     #endif
 }
 
 static void handle_unregister(message_t *msg) {
     int id = msg->slave_id;
     
-    if (id < 0 || id >= MAX_SLAVES || !slaves[id].active) {
+    if (id < 0 || id >= MAX_SLAVES) {
         return;
     }
     
-    close(slaves[id].fd);
-    slaves[id].fd = -1;
+    if (slaves[id].fd >= 0) {
+        close(slaves[id].fd);
+        slaves[id].fd = -1;
+    }
     slaves[id].active = 0;
     
     #if ENABLE_PRINTING
@@ -168,7 +203,8 @@ static void send_query(int slave_id, int payload) {
         .payload = payload
     };
     
-    if (write(slaves[slave_id].fd, &msg, sizeof(msg)) == sizeof(msg)) {
+    ssize_t written = write(slaves[slave_id].fd, &msg, sizeof(msg));
+    if (written == sizeof(msg)) {
         pthread_mutex_lock(&stats->mutex);
         stats->messages_sent[slave_id]++;
         stats->total_sent++;
@@ -177,6 +213,18 @@ static void send_query(int slave_id, int payload) {
         #if ENABLE_PRINTING
         printf("Master: Sent query to slave %d: %d\n", slave_id, payload);
         #endif
+    } else if (written < 0) {
+        // Slave może być niedostępny
+        if (errno == EPIPE || errno == EBADF) {
+            slaves[slave_id].active = 0;
+            if (slaves[slave_id].fd >= 0) {
+                close(slaves[slave_id].fd);
+                slaves[slave_id].fd = -1;
+            }
+            #if ENABLE_PRINTING
+            printf("Master: Slave %d disconnected\n", slave_id);
+            #endif
+        }
     }
 }
 
@@ -213,6 +261,9 @@ int main() {
     signal(SIGTERM, signal_handler);
     signal(SIGUSR1, signal_handler);
     
+    // Rejestruj cleanup przy wyjściu
+    atexit(cleanup_resources);
+    
     // Inicjalizacja pamięci dzielonej
     if (init_shared_memory() < 0) {
         return 1;
@@ -222,7 +273,6 @@ int main() {
     unlink(MASTER_FIFO);
     if (mkfifo(MASTER_FIFO, 0666) < 0) {
         perror("mkfifo master");
-        cleanup_shared_memory();
         return 1;
     }
     
@@ -230,8 +280,6 @@ int main() {
     master_fd = open(MASTER_FIFO, O_RDONLY | O_NONBLOCK);
     if (master_fd < 0) {
         perror("open master fifo");
-        unlink(MASTER_FIFO);
-        cleanup_shared_memory();
         return 1;
     }
     
@@ -241,6 +289,13 @@ int main() {
     
     // Główna pętla
     int query_counter = 0;
+    time_t last_query_time = time(NULL);
+    
+    struct pollfd pfd = {
+        .fd = master_fd,
+        .events = POLLIN
+    };
+    
     while (!should_exit) {
         // Sprawdź czy trzeba wyświetlić statystyki
         if (show_stats) {
@@ -248,46 +303,71 @@ int main() {
             show_stats = 0;
         }
         
-        // Czytaj komunikaty
-        message_t msg;
-        ssize_t bytes = read(master_fd, &msg, sizeof(msg));
+        // Poll z timeoutem 100ms
+        int ret = poll(&pfd, 1, 100);
         
-        if (bytes == sizeof(msg)) {
-            switch (msg.type) {
-                case MSG_REGISTER:
-                    handle_register(&msg);
-                    break;
-                case MSG_UNREGISTER:
-                    handle_unregister(&msg);
-                    break;
-                case MSG_RESPONSE:
-                    handle_response(&msg);
-                    break;
-            }
-        }
-        
-        // Co jakiś czas wysyłaj zapytania do aktywnych slave'ów
-        if (query_counter++ % 10000 == 0) {
-            for (int i = 0; i < MAX_SLAVES; i++) {
-                if (slaves[i].active) {
-                    send_query(i, query_counter / 10000);
+        if (ret > 0 && (pfd.revents & POLLIN)) {
+            // Czytaj wszystkie dostępne komunikaty
+            message_t msg;
+            ssize_t bytes;
+            
+            while ((bytes = read(master_fd, &msg, sizeof(msg))) == sizeof(msg)) {
+                switch (msg.type) {
+                    case MSG_REGISTER:
+                        handle_register(&msg);
+                        break;
+                    case MSG_UNREGISTER:
+                        handle_unregister(&msg);
+                        break;
+                    case MSG_RESPONSE:
+                        handle_response(&msg);
+                        break;
+                    default:
+                        fprintf(stderr, "Unknown message type: %d\n", msg.type);
                 }
             }
+            
+            if (bytes < 0 && errno != EAGAIN && errno != EWOULDBLOCK) {
+                perror("read master fifo");
+            }
         }
         
-        usleep(1000); // 1ms
-    }
-    
-    // Cleanup
-    for (int i = 0; i < MAX_SLAVES; i++) {
-        if (slaves[i].fd >= 0) {
-            close(slaves[i].fd);
+        // Co 500ms wysyłaj zapytania do aktywnych slave'ów
+        time_t current_time = time(NULL);
+        struct timespec ts;
+        clock_gettime(CLOCK_MONOTONIC, &ts);
+        
+        static long last_query_ms = 0;
+        long current_ms = ts.tv_sec * 1000 + ts.tv_nsec / 1000000;
+        
+        if (current_ms - last_query_ms >= 500) { // 500ms
+            last_query_ms = current_ms;
+            query_counter++;
+            
+            // Wyślij zapytania do wszystkich aktywnych slave'ów
+            int active_count = 0;
+            for (int i = 0; i < MAX_SLAVES; i++) {
+                if (slaves[i].active) {
+                    send_query(i, query_counter);
+                    active_count++;
+                }
+            }
+            
+            #if ENABLE_PRINTING
+            if (active_count > 0) {
+                printf("Master: Sent queries to %d slaves (round %d)\n", 
+                       active_count, query_counter);
+            }
+            #endif
         }
     }
     
-    close(master_fd);
-    unlink(MASTER_FIFO);
-    cleanup_shared_memory();
+    #if ENABLE_PRINTING
+    printf("Master: Shutting down...\n");
+    #endif
+    
+    // Wyświetl końcowe statystyki
+    display_stats();
     
     #if ENABLE_PRINTING
     printf("Master: Exiting\n");
