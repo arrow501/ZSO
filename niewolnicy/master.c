@@ -30,6 +30,10 @@ static volatile int should_exit = 0;
 static volatile int show_stats = 0;
 
 static void cleanup_resources() {
+    #if ENABLE_PRINTING
+    printf("Master: Cleaning up resources...\n");
+    #endif
+    
     // Zamknij połączenia ze slave'ami
     for (int i = 0; i < MAX_SLAVES; i++) {
         if (slaves[i].fd >= 0) {
@@ -66,6 +70,11 @@ static void cleanup_resources() {
 static void signal_handler(int sig) {
     if (sig == SIGINT || sig == SIGTERM) {
         should_exit = 1;
+        // Przerwij poll() przez zamknięcie fd
+        if (master_fd >= 0) {
+            close(master_fd);
+            master_fd = -1;
+        }
     } else if (sig == SIGUSR1) {
         show_stats = 1;
     }
@@ -87,6 +96,7 @@ static int init_shared_memory() {
     if (ftruncate(shm_fd, sizeof(stats_t)) < 0) {
         perror("ftruncate");
         close(shm_fd);
+        shm_unlink(SHM_NAME);
         return -1;
     }
     
@@ -96,6 +106,7 @@ static int init_shared_memory() {
     if (stats == MAP_FAILED) {
         perror("mmap");
         close(shm_fd);
+        shm_unlink(SHM_NAME);
         return -1;
     }
     
@@ -118,6 +129,8 @@ static int init_shared_memory() {
     stats_sem = sem_open(SEM_NAME, O_CREAT, 0666, 0);
     if (stats_sem == SEM_FAILED) {
         perror("sem_open");
+        munmap(stats, sizeof(stats_t));
+        shm_unlink(SHM_NAME);
         return -1;
     }
     
@@ -193,7 +206,7 @@ static void handle_response(message_t *msg) {
 }
 
 static void send_query(int slave_id, int payload) {
-    if (slave_id < 0 || slave_id >= MAX_SLAVES || !slaves[slave_id].active) {
+    if (slave_id < 0 || slave_id >= MAX_SLAVES || !slaves[slave_id].active || slaves[slave_id].fd < 0) {
         return;
     }
     
@@ -222,7 +235,11 @@ static void send_query(int slave_id, int payload) {
                 slaves[slave_id].fd = -1;
             }
             #if ENABLE_PRINTING
-            printf("Master: Slave %d disconnected\n", slave_id);
+            printf("Master: Slave %d disconnected (EPIPE/EBADF)\n", slave_id);
+            #endif
+        } else {
+            #if ENABLE_PRINTING
+            perror("write to slave");
             #endif
         }
     }
@@ -257,12 +274,24 @@ int main() {
     }
     
     // Obsługa sygnałów
-    signal(SIGINT, signal_handler);
-    signal(SIGTERM, signal_handler);
-    signal(SIGUSR1, signal_handler);
+    struct sigaction sa;
+    memset(&sa, 0, sizeof(sa));
+    sa.sa_handler = signal_handler;
+    sigemptyset(&sa.sa_mask);
+    sa.sa_flags = 0;
+    
+    if (sigaction(SIGINT, &sa, NULL) < 0 ||
+        sigaction(SIGTERM, &sa, NULL) < 0 ||
+        sigaction(SIGUSR1, &sa, NULL) < 0) {
+        perror("sigaction");
+        return 1;
+    }
     
     // Rejestruj cleanup przy wyjściu
-    atexit(cleanup_resources);
+    if (atexit(cleanup_resources) != 0) {
+        fprintf(stderr, "Failed to register cleanup function\n");
+        return 1;
+    }
     
     // Inicjalizacja pamięci dzielonej
     if (init_shared_memory() < 0) {
@@ -273,6 +302,7 @@ int main() {
     unlink(MASTER_FIFO);
     if (mkfifo(MASTER_FIFO, 0666) < 0) {
         perror("mkfifo master");
+        cleanup_resources();
         return 1;
     }
     
@@ -280,21 +310,24 @@ int main() {
     master_fd = open(MASTER_FIFO, O_RDONLY | O_NONBLOCK);
     if (master_fd < 0) {
         perror("open master fifo");
+        cleanup_resources();
         return 1;
     }
     
     #if ENABLE_PRINTING
-    printf("Master: Started\n");
+    printf("Master: Started (pid=%d)\n", getpid());
     #endif
     
     // Główna pętla
     int query_counter = 0;
-    time_t last_query_time = time(NULL);
-    
     struct pollfd pfd = {
         .fd = master_fd,
         .events = POLLIN
     };
+    
+    // Timing dla zapytań
+    struct timespec last_query_time;
+    clock_gettime(CLOCK_MONOTONIC, &last_query_time);
     
     while (!should_exit) {
         // Sprawdź czy trzeba wyświetlić statystyki
@@ -305,6 +338,14 @@ int main() {
         
         // Poll z timeoutem 100ms
         int ret = poll(&pfd, 1, 100);
+        
+        if (ret < 0) {
+            if (errno == EINTR) {
+                continue; // Sygnał, kontynuuj
+            }
+            perror("poll");
+            break;
+        }
         
         if (ret > 0 && (pfd.revents & POLLIN)) {
             // Czytaj wszystkie dostępne komunikaty
@@ -328,26 +369,27 @@ int main() {
             }
             
             if (bytes < 0 && errno != EAGAIN && errno != EWOULDBLOCK) {
-                perror("read master fifo");
+                if (errno != EBADF) { // Nie raportuj EBADF (zamknięty przez sygnał)
+                    perror("read master fifo");
+                }
             }
         }
         
-        // Co 500ms wysyłaj zapytania do aktywnych slave'ów
-        time_t current_time = time(NULL);
-        struct timespec ts;
-        clock_gettime(CLOCK_MONOTONIC, &ts);
+        // Sprawdź czy upłynęło 500ms od ostatniego zapytania
+        struct timespec current_time;
+        clock_gettime(CLOCK_MONOTONIC, &current_time);
         
-        static long last_query_ms = 0;
-        long current_ms = ts.tv_sec * 1000 + ts.tv_nsec / 1000000;
+        long elapsed_ms = (current_time.tv_sec - last_query_time.tv_sec) * 1000 +
+                         (current_time.tv_nsec - last_query_time.tv_nsec) / 1000000;
         
-        if (current_ms - last_query_ms >= 500) { // 500ms
-            last_query_ms = current_ms;
+        if (elapsed_ms >= 500) {
+            last_query_time = current_time;
             query_counter++;
             
             // Wyślij zapytania do wszystkich aktywnych slave'ów
             int active_count = 0;
             for (int i = 0; i < MAX_SLAVES; i++) {
-                if (slaves[i].active) {
+                if (slaves[i].active && slaves[i].fd >= 0) {
                     send_query(i, query_counter);
                     active_count++;
                 }
@@ -360,6 +402,11 @@ int main() {
             }
             #endif
         }
+        
+        // Sprawdź czy master_fd jest jeszcze ważny
+        if (master_fd < 0) {
+            break;
+        }
     }
     
     #if ENABLE_PRINTING
@@ -367,7 +414,9 @@ int main() {
     #endif
     
     // Wyświetl końcowe statystyki
-    display_stats();
+    if (stats != NULL) {
+        display_stats();
+    }
     
     #if ENABLE_PRINTING
     printf("Master: Exiting\n");
