@@ -81,7 +81,9 @@ static int create_slave_fifo(int id) {
              "%s%d", SLAVE_FIFO_PREFIX, id);
     
     // Remove existing FIFO if it exists
-    unlink(slave_fifo_path); // always safe      // Create the FIFO with read/write permissions for all
+    unlink(slave_fifo_path); // always safe      
+    
+    // Create the FIFO with read/write permissions for all
     if (mkfifo(slave_fifo_path, 0666) < 0) {
         PERROR_SLAVE("mkfifo");
         return -1;
@@ -113,7 +115,7 @@ static void process_query(message_t *query) {
            slave_id, query->payload);
     #endif
     
-    // Prosta odpowiedź - zwróć payload * 2
+    // Simple response logic: double the payload
     message_t response = {
         .type = MSG_RESPONSE,
         .slave_id = slave_id,
@@ -135,54 +137,73 @@ int main(int argc, char *argv[]) {
         return 1;
     }
     
-    // Ustawienie obsługi sygnałów
+    // Signal handling 
     signal(SIGTERM, signal_handler);
     signal(SIGINT, signal_handler);
     
-    // Rejestruj cleanup przy wyjściu
+    // Register cleanup function to be called on exit
     atexit(cleanup_and_exit);
     
-    // Stwórz FIFO dla slave'a
+    // Create FIFO for this slave
     if (create_slave_fifo(slave_id) < 0) {
         return 1;
-    }      // Otwórz FIFO mastera do pisania
+    }
+    // Open master FIFO for writing
     master_fd = open(MASTER_FIFO, O_WRONLY);
     if (master_fd < 0) {
         PERROR_SLAVE("open master fifo");
         return 1;
     }
     
-    // Zarejestruj się w masterze
+    // Wait for master to open the FIFO
     if (register_with_master() < 0) {
         return 1;
-    }      // Otwórz własne FIFO do czytania
+    }
+
+    // Open slave FIFO for reading      
     slave_fd = open(slave_fifo_path, O_RDONLY);
     if (slave_fd < 0) {
         PERROR_SLAVE("open slave fifo");
         return 1;
     }
     
-    // Główna pętla
+    // Main loop - keep reading messages from master
     while (!should_exit) {
         message_t msg;
         ssize_t bytes = read(slave_fd, &msg, sizeof(msg));
         
+        // Case 1: Complete message received
         if (bytes == sizeof(msg)) {
             if (msg.type == MSG_QUERY) {
                 process_query(&msg);
             }
-        } else if (bytes == 0) {
-            // EOF - master zamknął połączenie
+            continue; // read next message
+        }
+        
+        // Case 2: Master closed connection (EOF)
+        if (bytes == 0) {
             #if ENABLE_PRINTING
             printf("Slave %d: Master closed connection\n", slave_id);
             #endif
-            break;        } else if (bytes < 0) {            if (errno == EINTR || errno == EBADF) {
-                // Przerwane przez sygnał lub fd zamknięty
-                break;
+            break; // Exit main loop
+        }
+        
+        // Case 3: Read error occurred
+        if (bytes < 0) {
+            // Check if it's a signal interrupt or a bad file descriptor
+            if (errno == EINTR || errno == EBADF) { 
+                break; // Exit process gracefully
             }
+            // Real error - report it and exit
             PERROR_SLAVE("read slave fifo");
             break;
         }
+        
+        // Case 4: Partial read
+        #if ENABLE_PRINTING
+        printf("Slave %d: Partial read (%zd bytes), ignoring\n", slave_id, bytes);
+        #endif
+        // Ignore and try to continue
     }
     
     #if ENABLE_PRINTING
