@@ -132,6 +132,9 @@ static void handle_register(message_t *msg) {
         return;
     }
     
+    // Store the PID from payload
+    slaves[id].pid = msg->payload;
+    
     // Jeśli już jest zarejestrowany, zamknij stare połączenie
     if (slaves[id].fd >= 0) {
         close(slaves[id].fd);
@@ -151,7 +154,7 @@ static void handle_register(message_t *msg) {
     slaves[id].active = 1;
     
     #if ENABLE_PRINTING
-    printf("Master: Registered slave %d (fd=%d)\n", id, fd);
+    printf("Master: Registered slave %d (pid=%d, fd=%d)\n", id, slaves[id].pid, fd);
     #endif
 }
 

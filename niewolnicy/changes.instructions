@@ -1,0 +1,228 @@
+// 1. Update message.h to include PID in register message
+#ifndef MESSAGE_H
+#define MESSAGE_H
+
+#include <stdint.h>
+
+typedef struct {
+    int type;           // Typ komunikatu
+    int slave_id;       // ID slave'a
+    int payload;        // Dane komunikatu / PID for MSG_REGISTER
+} message_t;
+
+#endif /* MESSAGE_H */
+
+// 2. Update master.c - only the changed parts:
+
+// In slave_info_t structure, add:
+typedef struct {
+    int pid;        // PID of slave process
+    int fd;
+    int active;
+} slave_info_t;
+
+// In handle_register function:
+static void handle_register(message_t *msg) {
+    int id = msg->slave_id;
+    
+    if (id < 0 || id >= MAX_SLAVES) {
+        fprintf(stderr, "Invalid slave_id in register: %d\n", id);
+        return;
+    }
+    
+    // Store the PID from payload
+    slaves[id].pid = msg->payload;  // <-- ADD THIS
+    
+    // Rest of the function remains the same...
+    
+    #if ENABLE_PRINTING
+    printf("Master: Registered slave %d (pid=%d, fd=%d)\n", id, slaves[id].pid, fd);  // <-- UPDATE THIS
+    #endif
+}
+
+// 3. Update slave.c - only the changed parts:
+
+// In register_with_master function:
+static int register_with_master() {
+    message_t msg = {
+        .type = MSG_REGISTER,
+        .slave_id = slave_id,
+        .payload = getpid()  // <-- CHANGE THIS: Send PID as payload
+    };
+    
+    if (write(master_fd, &msg, sizeof(msg)) != sizeof(msg)) {
+        perror("write register");
+        return -1;
+    }
+    
+    #if ENABLE_PRINTING
+    printf("Slave %d: Registered with master (pid=%d)\n", slave_id, getpid());
+    #endif
+    
+    return 0;
+}
+
+// Update signal handler to notify master immediately:
+static void signal_handler(int sig) {
+    (void)sig;
+    
+    // Send unregister message immediately if connected
+    if (master_fd >= 0 && !should_exit) {
+        message_t msg = {
+            .type = MSG_UNREGISTER,
+            .slave_id = slave_id,
+            .payload = 0
+        };
+        
+        // Best effort - ignore errors
+        write(master_fd, &msg, sizeof(msg));
+    }
+    
+    should_exit = 1;
+    
+    // Close slave_fd to interrupt read()
+    if (slave_fd >= 0) {
+        int tmp = slave_fd;
+        slave_fd = -1;
+        close(tmp);
+    }
+}
+
+// 4. Create stats_reader.c - new file:
+#include <stdio.h>
+#include <stdlib.h>
+#include <sys/mman.h>
+#include <fcntl.h>
+#include <unistd.h>
+#include <semaphore.h>
+#include <signal.h>
+#include <time.h>
+#include "stats.h"
+#include "parameters.h"
+
+static volatile int should_exit = 0;
+
+static void signal_handler(int sig) {
+    (void)sig;
+    should_exit = 1;
+}
+
+int main() {
+    // Set up signal handler
+    signal(SIGINT, signal_handler);
+    signal(SIGTERM, signal_handler);
+    
+    // Open shared memory
+    int shm_fd = shm_open(SHM_NAME, O_RDONLY, 0666);
+    if (shm_fd < 0) {
+        perror("shm_open");
+        fprintf(stderr, "Is master running?\n");
+        return 1;
+    }
+    
+    // Map shared memory
+    stats_t *stats = mmap(NULL, sizeof(stats_t), PROT_READ, MAP_SHARED, shm_fd, 0);
+    if (stats == MAP_FAILED) {
+        perror("mmap");
+        close(shm_fd);
+        return 1;
+    }
+    
+    close(shm_fd);
+    
+    // Open semaphore
+    sem_t *stats_sem = sem_open(SEM_NAME, 0);
+    if (stats_sem == SEM_FAILED) {
+        perror("sem_open");
+        munmap(stats, sizeof(stats_t));
+        return 1;
+    }
+    
+    printf("Stats reader started. Send SIGUSR1 to master (or press Ctrl+C to exit)\n");
+    
+    // Wait for stats to be ready
+    while (!should_exit) {
+        struct timespec timeout;
+        clock_gettime(CLOCK_REALTIME, &timeout);
+        timeout.tv_sec += 1;  // 1 second timeout
+        
+        if (sem_timedwait(stats_sem, &timeout) == 0) {
+            // Stats are ready, display them
+            pthread_mutex_lock(&stats->mutex);
+            
+            printf("\n=== Master Statistics (from shared memory) ===\n");
+            printf("Total messages sent: %d\n", stats->total_sent);
+            printf("Total messages received: %d\n", stats->total_received);
+            
+            for (int i = 0; i < MAX_SLAVES; i++) {
+                if (stats->messages_sent[i] > 0 || stats->messages_received[i] > 0) {
+                    printf("Slave %d: sent=%d, received=%d\n", 
+                           i, stats->messages_sent[i], stats->messages_received[i]);
+                }
+            }
+            printf("==============================================\n\n");
+            
+            pthread_mutex_unlock(&stats->mutex);
+        }
+    }
+    
+    // Cleanup
+    sem_close(stats_sem);
+    munmap(stats, sizeof(stats_t));
+    
+    return 0;
+}
+
+// 5. Update Makefile to build stats_reader:
+CC = gcc
+CFLAGS = -Wall -Wextra -g -I.
+LDFLAGS = -pthread -lrt
+
+# Konfiguracja
+ENABLE_PRINTING = 1
+
+CFLAGS += -DENABLE_PRINTING=$(ENABLE_PRINTING)
+
+# Dodaj więcej warnings w trybie debug
+ifeq ($(ENABLE_PRINTING),1)
+    CFLAGS += -Wformat=2 -Wconversion -Wshadow
+endif
+
+all: master slave stats_reader  # <-- ADD stats_reader
+
+master: master.c
+	$(CC) $(CFLAGS) -o master master.c $(LDFLAGS)
+
+slave: slave.c
+	$(CC) $(CFLAGS) -o slave slave.c $(LDFLAGS)
+
+stats_reader: stats_reader.c  # <-- ADD THIS
+	$(CC) $(CFLAGS) -o stats_reader stats_reader.c $(LDFLAGS)
+
+# Kompilacja bez printów dla valgrind
+silent: ENABLE_PRINTING = 0
+silent: clean all
+
+clean:
+	rm -f master slave stats_reader  # <-- ADD stats_reader
+	rm -f /tmp/master_fifo /tmp/slave_fifo_*
+	rm -f /dev/shm/master_stats /dev/shm/sem.master_sem
+
+# Rest of Makefile remains the same...
+
+// 6. Update run_tests.sh to test stats_reader:
+# Add this section after "Requesting stats..." in run_tests.sh:
+
+# Test stats reader
+echo "Testing stats reader..."
+./stats_reader &
+READER_PID=$!
+sleep 1
+
+# Send signal to master to update stats
+kill -USR1 $MASTER_PID
+sleep 2
+
+# Kill stats reader
+kill -TERM $READER_PID
+wait $READER_PID 2>/dev/null

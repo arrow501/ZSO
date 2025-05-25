@@ -6,7 +6,7 @@
 typedef struct {
     int type;           // Typ komunikatu
     int slave_id;       // ID slave'a
-    int payload;        // Dane komunikatu
+    int payload;        // Dane komunikatu / PID for MSG_REGISTER
 } message_t;
 
 #endif /* MESSAGE_H */

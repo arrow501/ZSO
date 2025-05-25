@@ -97,6 +97,20 @@ echo "Requesting stats..."
 kill -USR1 $MASTER_PID
 sleep 1
 
+# Test stats reader
+echo "Testing stats reader..."
+./stats_reader &
+READER_PID=$!
+sleep 1
+
+# Send signal to master to update stats
+kill -USR1 $MASTER_PID
+sleep 2
+
+# Kill stats reader
+kill -TERM $READER_PID
+wait $READER_PID 2>/dev/null
+
 # Kill a slave
 echo "Killing slave 1..."
 kill -TERM $SLAVE1_PID

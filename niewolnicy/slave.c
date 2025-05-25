@@ -54,12 +54,26 @@ static void cleanup_and_exit() {
 
 static void signal_handler(int sig) {
     (void)sig;
+    
+    // Send unregister message immediately if connected
+    if (master_fd >= 0 && !should_exit) {
+        message_t msg = {
+            .type = MSG_UNREGISTER,
+            .slave_id = slave_id,
+            .payload = 0
+        };
+        
+        // Best effort - ignore errors
+        write(master_fd, &msg, sizeof(msg));
+    }
+    
     should_exit = 1;
     
-    // Jeśli czekamy na read(), przerwij go
+    // Close slave_fd to interrupt read()
     if (slave_fd >= 0) {
-        close(slave_fd);
+        int tmp = slave_fd;
         slave_fd = -1;
+        close(tmp);
     }
 }
 
@@ -82,7 +96,7 @@ static int register_with_master() {
     message_t msg = {
         .type = MSG_REGISTER,
         .slave_id = slave_id,
-        .payload = 0
+        .payload = getpid()
     };
     
     if (write(master_fd, &msg, sizeof(msg)) != sizeof(msg)) {
@@ -91,7 +105,7 @@ static int register_with_master() {
     }
     
     #if ENABLE_PRINTING
-    printf("Slave %d: Registered with master\n", slave_id);
+    printf("Slave %d: Registered with master (pid=%d)\n", slave_id, getpid());
     #endif
     
     return 0;

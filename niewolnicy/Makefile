@@ -12,7 +12,7 @@ ifeq ($(ENABLE_PRINTING),1)
     CFLAGS += -Wformat=2 -Wconversion -Wshadow
 endif
 
-all: master slave
+all: master slave stats_reader
 
 master: master.c
 	$(CC) $(CFLAGS) -o master master.c $(LDFLAGS)
@@ -20,12 +20,15 @@ master: master.c
 slave: slave.c
 	$(CC) $(CFLAGS) -o slave slave.c $(LDFLAGS)
 
+stats_reader: stats_reader.c
+	$(CC) $(CFLAGS) -o stats_reader stats_reader.c $(LDFLAGS)
+
 # Kompilacja bez printów dla valgrind
 silent: ENABLE_PRINTING = 0
 silent: clean all
 
 clean:
-	rm -f master slave
+	rm -f master slave stats_reader
 	rm -f /tmp/master_fifo /tmp/slave_fifo_*
 	rm -f /dev/shm/master_stats /dev/shm/sem.master_sem
 
