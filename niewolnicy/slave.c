@@ -30,9 +30,9 @@ static void cleanup_and_exit() {
         // Ignore write errors - master might be gone
         write(master_fd, &msg, sizeof(msg));
 
-#if ENABLE_PRINTING
+    #if ENABLE_PRINTING
         printf("Slave %d: Sent unregister message\n", slave_id);
-#endif
+    #endif
     }
 
     // Cleanup
@@ -49,9 +49,9 @@ static void cleanup_and_exit() {
     // remove FIFO file
     if (strlen(slave_fifo_path) > 0) {
         unlink(slave_fifo_path);
-#if ENABLE_PRINTING
+    #if ENABLE_PRINTING
         printf("Slave %d: Removed FIFO %s\n", slave_id, slave_fifo_path);
-#endif
+    #endif
     }
 }
 
@@ -171,9 +171,9 @@ int main(int argc, char* argv[]) {
 
         // Case 2: Master closed connection (EOF)
         if (bytes == 0) {
-#if ENABLE_PRINTING
+        #if ENABLE_PRINTING
             printf("Slave %d: Master closed connection\n", slave_id);
-#endif
+        #endif
             break; // Exit main loop
         }
 
@@ -189,9 +189,9 @@ int main(int argc, char* argv[]) {
         }
 
         // Case 4: Partial read
-#if ENABLE_PRINTING
+    #if ENABLE_PRINTING
         printf("Slave %d: Partial read (%zd bytes), ignoring\n", slave_id, bytes);
-#endif
+    #endif
         // Ignore and try to continue
     }
 
