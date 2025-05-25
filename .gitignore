@@ -1,2 +1,5 @@
 */bin/*
 */obj/*
+niewolnicy/master
+niewolnicy/slave
+niewolnicy/stats_reader
