@@ -9,14 +9,20 @@
 #include "parameters.h"
 #include "message.h"
 
+#define PERROR_SLAVE(msg) do { \
+    char err[64]; \
+    snprintf(err, sizeof(err), msg " slave %d", slave_id); \
+    perror(err); \
+} while(0)
+
 static int slave_id;
 static int master_fd = -1;
 static int slave_fd = -1;
-static char slave_fifo_path[256];
+static char slave_fifo_path[256] = {0};  // Initialize to prevent valgrind warnings
 static volatile int should_exit = 0;
 
 static void cleanup_and_exit() {
-    // Wyrejestruj się jeśli połączenie jest aktywne
+    // Unregister from master if connected
     if (master_fd >= 0) {
         message_t msg = {
             .type = MSG_UNREGISTER,
@@ -43,7 +49,7 @@ static void cleanup_and_exit() {
         master_fd = -1;
     }
     
-    // Usuń FIFO
+    // remove FIFO file
     if (strlen(slave_fifo_path) > 0) {
         unlink(slave_fifo_path);
         #if ENABLE_PRINTING
@@ -53,25 +59,31 @@ static void cleanup_and_exit() {
 }
 
 static void signal_handler(int sig) {
-    (void)sig;
-    should_exit = 1;
+    (void)sig; // ignore parameter
+
+    should_exit = 1; // Set flag to exit main loop
     
-    // Jeśli czekamy na read(), przerwij go
+    // Interrupt any blocking I/O operations
     if (slave_fd >= 0) {
         close(slave_fd);
         slave_fd = -1;
     }
+    
+    if (master_fd >= 0) {
+        close(master_fd);
+        master_fd = -1;
+    }
 }
 
 static int create_slave_fifo(int id) {
+    // Create the FIFO path, ex. "/tmp/slave_fifo_0"
     snprintf(slave_fifo_path, sizeof(slave_fifo_path), 
              "%s%d", SLAVE_FIFO_PREFIX, id);
     
-    // Usuń stare FIFO jeśli istnieje
-    unlink(slave_fifo_path);
-    
+    // Remove existing FIFO if it exists
+    unlink(slave_fifo_path); // always safe      // Create the FIFO with read/write permissions for all
     if (mkfifo(slave_fifo_path, 0666) < 0) {
-        perror("mkfifo slave");
+        PERROR_SLAVE("mkfifo");
         return -1;
     }
     
@@ -83,10 +95,8 @@ static int register_with_master() {
         .type = MSG_REGISTER,
         .slave_id = slave_id,
         .payload = 0
-    };
-    
-    if (write(master_fd, &msg, sizeof(msg)) != sizeof(msg)) {
-        perror("write register");
+    };      if (write(master_fd, &msg, sizeof(msg)) != sizeof(msg)) {
+        PERROR_SLAVE("write register");
         return -1;
     }
     
@@ -108,10 +118,8 @@ static void process_query(message_t *query) {
         .type = MSG_RESPONSE,
         .slave_id = slave_id,
         .payload = query->payload * 2
-    };
-    
-    if (write(master_fd, &response, sizeof(response)) != sizeof(response)) {
-        perror("write response");
+    };      if (write(master_fd, &response, sizeof(response)) != sizeof(response)) {
+        PERROR_SLAVE("write response");
     }
 }
 
@@ -137,24 +145,20 @@ int main(int argc, char *argv[]) {
     // Stwórz FIFO dla slave'a
     if (create_slave_fifo(slave_id) < 0) {
         return 1;
-    }
-    
-    // Otwórz FIFO mastera do pisania
+    }      // Otwórz FIFO mastera do pisania
     master_fd = open(MASTER_FIFO, O_WRONLY);
     if (master_fd < 0) {
-        perror("open master fifo");
+        PERROR_SLAVE("open master fifo");
         return 1;
     }
     
     // Zarejestruj się w masterze
     if (register_with_master() < 0) {
         return 1;
-    }
-    
-    // Otwórz własne FIFO do czytania
+    }      // Otwórz własne FIFO do czytania
     slave_fd = open(slave_fifo_path, O_RDONLY);
     if (slave_fd < 0) {
-        perror("open slave fifo");
+        PERROR_SLAVE("open slave fifo");
         return 1;
     }
     
@@ -172,13 +176,11 @@ int main(int argc, char *argv[]) {
             #if ENABLE_PRINTING
             printf("Slave %d: Master closed connection\n", slave_id);
             #endif
-            break;
-        } else if (bytes < 0) {
-            if (errno == EINTR || errno == EBADF) {
+            break;        } else if (bytes < 0) {            if (errno == EINTR || errno == EBADF) {
                 // Przerwane przez sygnał lub fd zamknięty
                 break;
             }
-            perror("read slave fifo");
+            PERROR_SLAVE("read slave fifo");
             break;
         }
     }
