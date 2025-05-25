@@ -1,0 +1,7 @@
+{
+    "files.associations": {
+        "message.h": "c",
+        "parameters.h": "c",
+        "stats.h": "c"
+    }
+}
