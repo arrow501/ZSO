@@ -3,6 +3,10 @@
 # Simple Valgrind Test Suite for Master-Slave IPC System
 # This script runs comprehensive tests using Valgrind tools to ensure memory and thread safety
 
+# Reset state
+make release
+rm -rf valgrind_logs
+
 # Colors
 RED='\033[0;31m'
 GREEN='\033[0;32m'
