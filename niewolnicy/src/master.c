@@ -105,14 +105,12 @@ static int setup_shared_memory(void) {
 }
 
 static int setup_semaphore(void) {
-    // Clean up any existing semaphore
-    sem_unlink(SEM_NAME);
-    
-    // Verify it's gone by trying to open it
+    // Check if semaphore already exists - if so, exit immediately
     sem_t *test_sem = sem_open(SEM_NAME, 0);
     if (test_sem != SEM_FAILED) {
         sem_close(test_sem);
-        DEBUG_ASSERT(0, "Semaphore should not exist after unlink");
+        fprintf(stderr, "FATAL: Semaphore %s already exists - another master may be running\n", SEM_NAME);
+        exit(EXIT_FAILURE);
     }
     
     // Create named semaphore for signaling stats updates
