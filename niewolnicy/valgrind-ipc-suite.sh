@@ -4,7 +4,7 @@
 # This script runs comprehensive tests using Valgrind tools to ensure memory and thread safety
 
 # Reset state
-make release
+make debug
 rm -rf valgrind_logs
 
 # Colors
