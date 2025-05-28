@@ -105,14 +105,6 @@ static int setup_shared_memory(void) {
 }
 
 static int setup_semaphore(void) {
-    // Check if semaphore already exists - if so, exit immediately
-    sem_t *test_sem = sem_open(SEM_NAME, 0);
-    if (test_sem != SEM_FAILED) {
-        sem_close(test_sem);
-        fprintf(stderr, "FATAL: Semaphore %s already exists - another master may be running\n", SEM_NAME);
-        exit(EXIT_FAILURE);
-    }
-    
     // Create named semaphore for signaling stats updates
     // Initial value 0 - readers will block until we post
     stats_ready_sem = sem_open(SEM_NAME, O_CREAT | O_EXCL, 0666, 0);
