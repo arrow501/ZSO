@@ -1,22 +1,4 @@
-// === Query Management ===
-static void send_queries_to_slaves(int query_value) {
-    DEBUG_ASSERT(query_value > 0, "Query value should be positive");
-    DEBUG_ASSERT(stats != NULL, "Stats should be initialized");
-    
-    int sent_count = 0;
-    
-    for (int i = 0; i < MAX_SLAVES; i++) {
-        if (!slaves[i].active || slaves[i].fd < 0) continue;
-        
-        DEBUG_ASSERT(slaves[i].pid > 0, "Active slave should have valid PID");
-        
-        message_t msg = {
-            .type = MSG_QUERY,
-            .slave_id = i,
-            .payload = query_value
-        };
-        
-        ssize_t written = write(slaves[// === common.h - Shared definitions and structures ===
+=== common.h - Shared definitions and structures ===
 #ifndef COMMON_H
 #define COMMON_H
 
