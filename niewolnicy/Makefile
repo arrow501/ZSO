@@ -1,65 +1,101 @@
 CC = gcc
-CFLAGS = -Wall -Wextra -g -I.
+CFLAGS = -Wall -Wextra -g -std=c99 -D_GNU_SOURCE
 LDFLAGS = -pthread -lrt
 
-# Konfiguracja
-ENABLE_PRINTING = 1
+# Enable all warnings for better code quality
+CFLAGS += -Wformat=2 -Wconversion -Wshadow -Wpointer-arith
+CFLAGS += -Wcast-qual -Wstrict-prototypes -Wmissing-prototypes
 
-CFLAGS += -DENABLE_PRINTING=$(ENABLE_PRINTING)
-
-# Dodaj więcej warnings w trybie debug
-ifeq ($(ENABLE_PRINTING),1)
-    CFLAGS += -Wformat=2 -Wconversion -Wshadow
+# Debug/Release configuration
+DEBUG ?= 1
+ifeq ($(DEBUG),1)
+    CFLAGS += -DDEBUG=1 -O0 -g3
+else
+    CFLAGS += -DDEBUG=0 -O2 -DNDEBUG
 endif
 
-all: master slave
+# Include directory
+CFLAGS += -Iinclude
 
-master: master.c
-	$(CC) $(CFLAGS) -o master master.c $(LDFLAGS)
+# Source and object directories
+SRCDIR = src
+OBJDIR = obj
+SOURCES = $(wildcard $(SRCDIR)/*.c)
+OBJECTS = $(SOURCES:$(SRCDIR)/%.c=$(OBJDIR)/%.o)
 
-slave: slave.c
-	$(CC) $(CFLAGS) -o slave slave.c $(LDFLAGS)
+# Executables
+TARGETS = master slave stats_reader
 
-# Kompilacja bez printów dla valgrind
-silent: ENABLE_PRINTING = 0
-silent: clean all
+all: $(OBJDIR) $(TARGETS)
+
+$(OBJDIR):
+	mkdir -p $(OBJDIR)
+
+master: $(OBJDIR)/master.o
+	$(CC) $(CFLAGS) -o $@ $< $(LDFLAGS)
+
+slave: $(OBJDIR)/slave.o
+	$(CC) $(CFLAGS) -o $@ $< $(LDFLAGS)
+
+stats_reader: $(OBJDIR)/stats_reader.o
+	$(CC) $(CFLAGS) -o $@ $< $(LDFLAGS)
+
+$(OBJDIR)/%.o: $(SRCDIR)/%.c include/common.h
+	$(CC) $(CFLAGS) -c $< -o $@
+
+# Debug build (default)
+debug: DEBUG=1
+debug: clean all
+
+# Release build (no debug assertions)
+release: DEBUG=0
+release: clean all
 
 clean:
-	rm -f master slave
+	rm -f $(TARGETS)
+	rm -rf $(OBJDIR)
 	rm -f /tmp/master_fifo /tmp/slave_fifo_*
-	rm -f /dev/shm/master_stats /dev/shm/sem.master_sem
+	rm -f /dev/shm/master_stats /dev/shm/sem.stats_ready
 
-test: all
-	@echo "Uruchamianie testów..."
-	@chmod +x run_tests.sh
-	./run_tests.sh
+# Quick test
+test: debug
+	./test.sh
 
-# Testy z valgrindem
-valgrind-test: silent
-	@echo "Uruchamianie testów z valgrindem..."
-	valgrind --leak-check=full --show-leak-kinds=all --track-origins=yes \
-		--log-file=valgrind-master.log ./master &
+# Test release build
+test-release: release
+	./test.sh
+
+# Valgrind memory check
+valgrind-memcheck: debug
+	@echo "=== Running Valgrind Memory Check ==="
+	valgrind --leak-check=full --show-leak-kinds=all \
+	         --track-origins=yes --verbose \
+	         ./master 2>&1 | tee valgrind-master.log &
 	@sleep 2
-	valgrind --leak-check=full --show-leak-kinds=all --track-origins=yes \
-		--log-file=valgrind-slave0.log ./slave 0 &
-	@sleep 1
-	valgrind --leak-check=full --show-leak-kinds=all --track-origins=yes \
-		--log-file=valgrind-slave1.log ./slave 1 &
+	valgrind --leak-check=full ./slave 0 2>&1 | tee valgrind-slave.log &
 	@sleep 5
-	@pkill -TERM slave
+	@killall master slave 2>/dev/null || true
+	@echo "=== Check valgrind-*.log files for results ==="
+
+# Helgrind thread check
+valgrind-threads: debug
+	@echo "=== Running Helgrind Thread Check ==="
+	valgrind --tool=helgrind ./master 2>&1 | tee helgrind-master.log &
 	@sleep 2
-	@pkill -TERM master
+	./slave 0 &
+	./slave 1 &
+	@sleep 5
+	@killall master slave 2>/dev/null || true
+	@echo "=== Check helgrind-*.log for results ==="
+
+# DRD thread check
+valgrind-drd: debug
+	@echo "=== Running DRD Thread Check ==="
+	valgrind --tool=drd --check-stack-var=yes ./master 2>&1 | tee drd-master.log &
 	@sleep 2
-	@echo "Sprawdzanie logów valgrind..."
-	@grep "ERROR SUMMARY" valgrind-*.log
-	@rm -f valgrind-*.log
+	./slave 0 &
+	@sleep 5
+	@killall master slave 2>/dev/null || true
+	@echo "=== Check drd-*.log for results ==="
 
-# Test pojedynczego mastera
-test-master: all
-	./master
-
-# Test pojedynczego slave'a
-test-slave: all
-	./slave 0
-
-.PHONY: all clean test silent valgrind-test test-master test-slave
+.PHONY: all clean test test-release debug release valgrind-memcheck valgrind-threads valgrind-drd
