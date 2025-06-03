@@ -31,10 +31,10 @@
 #define QUERY_INTERVAL_MS 1000
 
 // IPC paths
-#define MASTER_FIFO "/tmp/master_fifo"
-#define SLAVE_FIFO_PREFIX "/tmp/slave_fifo_"
-#define SHM_NAME "/master_stats"
-#define SEM_NAME "/stats_ready"
+#define MASTER_FIFO "/tmp/master_s29379_fifo"
+#define SLAVE_FIFO_PREFIX "/tmp/slave_s29379_fifo_"
+#define SHM_NAME "/master_stats_s29379"
+#define SEM_NAME "/stats_ready_s29379"
 
 // Message types
 typedef enum {
