@@ -7,7 +7,6 @@ cleanup() {
     echo "Cleaning up..."
     killall master slave stats_reader 2>/dev/null || true
     sleep 1
-    rm -f /tmp/master_fifo /tmp/slave_fifo_*
 }
 
 # Set trap for cleanup

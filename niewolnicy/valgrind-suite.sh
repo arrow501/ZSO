@@ -43,10 +43,9 @@ cleanup() {
     pkill -f "./stats_reader" 2>/dev/null || true
     pkill -f "valgrind.*master" 2>/dev/null || true
     pkill -f "valgrind.*slave" 2>/dev/null || true
-    pkill -f "valgrind.*stats_reader" 2>/dev/null || true
-    sleep 1
-    rm -f /tmp/master_fifo /tmp/slave_fifo_* 2>/dev/null || true
-    rm -f /dev/shm/master_stats /dev/shm/sem.stats_ready 2>/dev/null || true
+    pkill -f "valgrind.*stats_reader" 2>/dev/null || true    sleep 1
+    rm -f /tmp/master_s29379_fifo /tmp/slave_s29379_fifo_* 2>/dev/null || true
+    rm -f /dev/shm/master_stats_s29379 /dev/shm/sem.stats_ready_s29379 2>/dev/null || true
     echo -e "${GREEN}✓ Cleanup complete${NC}"
     
     export CLEANUP_RUNNING=false
