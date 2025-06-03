@@ -41,8 +41,8 @@ release: clean all
 
 clean:
 	rm -f master slave stats_reader
-	rm -f /tmp/master_fifo /tmp/slave_fifo_*
-	rm -f /dev/shm/master_stats /dev/shm/sem.stats_ready
+	rm -f /tmp/master_s29379_fifo /tmp/slave_s29379_fifo_*
+	rm -f /dev/shm/master_stats_s29379 /dev/shm/sem.stats_ready_s29379
 
 # Quick test
 test: debug
