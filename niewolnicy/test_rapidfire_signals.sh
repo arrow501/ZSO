@@ -18,7 +18,7 @@ run_test() {
     shift 3
     "$@"
     
-    sleep 10
+    sleep 5
     kill $reader_pid 2>/dev/null
     wait $reader_pid 2>/dev/null
     
