@@ -26,14 +26,15 @@ static int master_fd = -1;
 static stats_t *stats = NULL;
 static sem_t *stats_ready_sem = NULL;
 static volatile sig_atomic_t should_exit = 0;
-static volatile sig_atomic_t dump_stats = 0;
+static volatile sig_atomic_t signal_count = 0;  // Count signals received
+static volatile sig_atomic_t processed_count = 0;  // Count signals processed
 
 // === Signal Handling ===
 static void handle_signal(int sig) {
     if (sig == SIGINT || sig == SIGTERM) {
         should_exit = 1;
     } else if (sig == SIGUSR1) {
-        dump_stats = 1;
+        signal_count++;  // Atomically increment signal counter
     }
 }
 
@@ -308,9 +309,9 @@ static int master_main_loop(void) {
     gettimeofday(&last_query_time, NULL);
     
     while (!should_exit) {
-        // Handle stats dump request
-        if (dump_stats) {
-            dump_stats = 0;
+        // Handle all pending stats dump requests
+        while (processed_count < signal_count) {
+            processed_count++;
             signal_stats_ready();
         }
         
