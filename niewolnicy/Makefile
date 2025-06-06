@@ -4,9 +4,8 @@ LDFLAGS = -pthread -lrt
 INCLUDES = -Iinclude
 SRCDIR = src
 
-# Follow parameters.h defaults, debug/release as explicit targets
-CFLAGS += -DENABLE_PRINTING=$(shell grep -o 'ENABLE_PRINTING [0-9]' include/parameters.h | awk '{print $2}' || echo 1)
-CFLAGS += -DENABLE_ASSERTS=$(shell grep -o 'ENABLE_ASSERTS [0-9]' include/parameters.h | awk '{print $2}' || echo 1)
+# Follow parameters.h defaults by default
+# (no explicit flags = use what's in parameters.h)
 
 # Override parameters if provided
 ifdef NUM_SLAVES
@@ -28,11 +27,11 @@ slave: $(SRCDIR)/slave.c include/common.h include/parameters.h
 main: $(SRCDIR)/main.c include/common.h include/parameters.h
 	$(CC) $(CFLAGS) $(INCLUDES) -o $@ $< $(LDFLAGS)
 
-# Debug mode (override parameters.h)
+# Debug mode (force debug settings)
 debug: CFLAGS += -DENABLE_PRINTING=1 -DENABLE_ASSERTS=1 -O0 -g3
 debug: clean all
 
-# Release mode (override parameters.h)
+# Release mode (force release settings)
 release: CFLAGS += -DENABLE_PRINTING=0 -DENABLE_ASSERTS=0 -O2 -DNDEBUG
 release: clean all
 
@@ -46,4 +45,4 @@ clean:
 	rm -f /tmp/master_fifo_* /tmp/slave_fifo_* /tmp/master_pid_*
 	rm -f /dev/shm/master_stats_* /dev/shm/sem.stats_ready_* /dev/shm/sem.stats_init_*
 
-.PHONY: all clean debug release small large test
+.PHONY: all clean debug release test
