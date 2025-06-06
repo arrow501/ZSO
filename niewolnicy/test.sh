@@ -6,7 +6,7 @@ echo "Thorough Testing"
 echo "==============="
 
 make clean >/dev/null
-make debug >/dev/null
+make release >/dev/null
 echo "✅ Built"
 
 # Test 1: Stats signal counting
