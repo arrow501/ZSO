@@ -14,7 +14,7 @@
 
 /** Number of messages each slave should process before exiting */
 #ifndef NUM_MESSAGES_PER_SLAVE
-#define NUM_MESSAGES_PER_SLAVE 500
+#define NUM_MESSAGES_PER_SLAVE 50
 #endif
 
 /** Controls debug output (1 = enabled, 0 = disabled) */
@@ -34,7 +34,7 @@
 
 /** Query delay cycles to control execution speed */
 #ifndef QUERY_DELAY_CYCLES
-#define QUERY_DELAY_CYCLES 1000000
+#define QUERY_DELAY_CYCLES 100000000
 #endif
 
 /** System UUID for unique IPC resource names */
