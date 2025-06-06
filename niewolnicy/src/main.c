@@ -3,10 +3,10 @@
 #include <string.h>
 #include <unistd.h>
 #include <sys/wait.h>
-#include <sys/select.h>
 #include <signal.h>
 #include <errno.h>
 #include <fcntl.h>
+#include <poll.h>
 #include "../include/common.h"
 
 // Global state
@@ -14,11 +14,15 @@ static pid_t master_pid = 0;
 static pid_t slave_pids[MAX_SLAVES];
 static int num_slaves_started = 0;
 static volatile sig_atomic_t should_exit = 0;
-static volatile sig_atomic_t stats_requested = 0;
 
 static void handle_signal(int sig) {
     if (sig == SIGINT || sig == SIGTERM) {
         should_exit = 1;
+    } else if (sig == SIGUSR1) {
+        // Forward signal to master for stats display
+        if (master_pid > 0) {
+            kill(master_pid, SIGUSR1);
+        }
     }
 }
 
@@ -52,19 +56,32 @@ static void show_help(const char *program_name) {
     printf("  num_slaves: 1-%d\n", MAX_SLAVES);
 }
 
-static void request_stats(void) {
+static void request_stats_from_master(void) {
     if (master_pid > 0) {
+        printf("Requesting stats from master...\n");
         kill(master_pid, SIGUSR1);
-        stats_requested = 1;
     }
 }
 
-static void wait_for_stats_display(void) {
-    // Simple wait for master to display stats
-    for (int i = 0; i < 100; i++) {
-        for (volatile int j = 0; j < 50000; j++);
+// Non-blocking input check using poll (no time dependency)
+static int check_for_input(void) {
+    struct pollfd pfd = { .fd = STDIN_FILENO, .events = POLLIN };
+    
+    // Poll with 0 timeout = immediate return (non-blocking)
+    int ret = poll(&pfd, 1, 0);
+    
+    if (ret > 0 && (pfd.revents & POLLIN)) {
+        char input[10];
+        if (fgets(input, sizeof(input), stdin) != NULL) {
+            if (input[0] == 'q' || input[0] == 'Q') {
+                return 2; // Quit requested
+            } else {
+                return 1; // Stats requested
+            }
+        }
     }
-    stats_requested = 0;
+    
+    return 0; // No input
 }
 
 int main(int argc, char *argv[]) {
@@ -88,6 +105,7 @@ int main(int argc, char *argv[]) {
     
     signal(SIGINT, handle_signal);
     signal(SIGTERM, handle_signal);
+    signal(SIGUSR1, handle_signal);  // Forward SIGUSR1 to master
     atexit(cleanup_processes);
     
 #if ENABLE_PRINTING
@@ -141,13 +159,15 @@ int main(int argc, char *argv[]) {
     
 #if ENABLE_PRINTING
     printf("Main: All processes started\n");
+    printf("Main: Send SIGUSR1 to this process (PID=%d) to display stats\n", getpid());
+    printf("Main: Press Ctrl+C to stop all processes\n");
 #endif
     
-    // Interactive mode - prompt for user input
+    // Interactive mode - also show prompt for manual testing
     printf("Master-Slave IPC System running with %d slaves\n", num_slaves);
     printf("Press ENTER to display statistics, 'q' + ENTER to quit\n");
     
-    char input[10];
+    // Main loop - handle both signals and interactive input
     while (!should_exit) {
         // Check for child process exits
         int status;
@@ -187,28 +207,19 @@ int main(int argc, char *argv[]) {
             }
         }
         
-        // Check for user input (non-blocking)
-        fd_set readfds;
-        struct timeval timeout;
-        FD_ZERO(&readfds);
-        FD_SET(STDIN_FILENO, &readfds);
-        timeout.tv_sec = 0;
-        timeout.tv_usec = 100000; // 100ms timeout
-        
-        int ready = select(STDIN_FILENO + 1, &readfds, NULL, NULL, &timeout);
-        
-        if (ready > 0 && FD_ISSET(STDIN_FILENO, &readfds)) {
-            if (fgets(input, sizeof(input), stdin) != NULL) {
-                if (input[0] == 'q' || input[0] == 'Q') {
-                    should_exit = 1;
-                    break;
-                } else {
-                    // Any other input triggers stats display
-                    request_stats();
-                    wait_for_stats_display();
-                }
-            }
+        // Check for user input (non-blocking, no time dependency)
+        int input_result = check_for_input();
+        if (input_result == 2) {
+            // Quit requested
+            should_exit = 1;
+            break;
+        } else if (input_result == 1) {
+            // Stats requested
+            request_stats_from_master();
         }
+        
+        // Brief CPU pause to avoid busy waiting
+        for (volatile int i = 0; i < 10000; i++);
     }
     
 #if ENABLE_PRINTING
