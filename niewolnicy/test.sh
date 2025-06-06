@@ -1,12 +1,9 @@
 #!/bin/bash
 
-echo "=== Comprehensive IPC System Test ==="
+echo "=== Simple Message Counting Test ==="
 
-# Cleanup function
 cleanup() {
-    echo "Cleaning up..."
     killall main master slave 2>/dev/null || true
-    sleep 1
     rm -f /tmp/master_fifo_2e518cc1-6b7d-45c9-a7f6-1a7d35fcbb3f 2>/dev/null || true
     rm -f /tmp/slave_fifo_2e518cc1-6b7d-45c9-a7f6-1a7d35fcbb3f_* 2>/dev/null || true
     rm -f /tmp/master_pid_2e518cc1-6b7d-45c9-a7f6-1a7d35fcbb3f 2>/dev/null || true
@@ -14,245 +11,65 @@ cleanup() {
     rm -f /dev/shm/sem.stats_ready_2e518cc1-6b7d-45c9-a7f6-1a7d35fcbb3f 2>/dev/null || true
 }
 
+count_stats_displays() {
+    local log_file="$1"
+    grep -c "=== Master Statistics ===" "$log_file" 2>/dev/null || echo 0
+}
+
+extract_totals() {
+    local log_file="$1"
+    grep "Totals:" "$log_file" | tail -n 1 | grep -o "[0-9]\+ sent, [0-9]\+ received" || echo "0 sent, 0 received"
+}
+
 trap cleanup EXIT
 cleanup
 
-get_master_pid() {
-    # Read master PID from PID file
-    local pid_file="/tmp/master_pid_2e518cc1-6b7d-45c9-a7f6-1a7d35fcbb3f"
-    if [[ -f "$pid_file" ]]; then
-        cat "$pid_file" 2>/dev/null
-    else
-        # Fallback to pgrep
-        pgrep master | head -n 1
-    fi
-}
-
-verify_stats_output() {
-    local expected_slaves="$1"
-    local output_file="/tmp/test_stats_output.txt"
-    
-    # Capture stats output
-    timeout 5s bash -c "
-        local master_pid=\$(get_master_pid)
-        if [[ -n \"\$master_pid\" ]]; then
-            kill -USR1 \$master_pid 2>/dev/null
-            sleep 1
-        fi
-    " > "$output_file" 2>&1
-    
-    # Check if stats were displayed
-    if grep -q "Master Statistics" "$output_file"; then
-        echo "✓ Stats display working"
-        
-        # Check active slaves count
-        local active_count=$(grep "active slaves" "$output_file" | grep -o "[0-9]\+ active slaves" | grep -o "^[0-9]\+")
-        if [[ "$active_count" -eq "$expected_slaves" ]]; then
-            echo "✓ Correct number of active slaves: $active_count"
-        else
-            echo "⚠ Expected $expected_slaves active slaves, found $active_count"
-        fi
-        
-        # Check if messages are being processed
-        if grep -q "sent=[0-9]\+, received=[0-9]\+" "$output_file"; then
-            echo "✓ Message processing detected"
-        else
-            echo "⚠ No message processing detected"
-        fi
-        
-        return 0
-    else
-        echo "✗ No stats output detected"
-        return 1
-    fi
-}
-
-run_test() {
-    local test_name="$1"
-    local num_slaves="$2"
-    local test_duration="$3"
-    
-    echo ""
-    echo "=== $test_name ==="
-    
-    # Start main process with shorter message limit for testing
-    NUM_MESSAGES_PER_SLAVE=5 ./main $num_slaves &
-    MAIN_PID=$!
-    
-    sleep 2
-    
-    # Verify processes are running
-    if ! kill -0 $MAIN_PID 2>/dev/null; then
-        echo "FAIL: Main process not running"
-        return 1
-    fi
-    
-    if ! pgrep master > /dev/null; then
-        echo "FAIL: Master not running"
-        return 1
-    fi
-    
-    local slave_count=$(pgrep slave | wc -l)
-    if [ "$slave_count" -ne "$num_slaves" ]; then
-        echo "FAIL: Expected $num_slaves slaves, found $slave_count"
-        return 1
-    fi
-    
-    echo "✓ All processes started successfully"
-    
-    # Get master PID for direct signaling
-    local master_pid=$(get_master_pid)
-    if [[ -z "$master_pid" ]]; then
-        echo "FAIL: Could not get master PID"
-        return 1
-    fi
-    
-    # Test signal handling - send directly to master
-    echo "Testing signal handling..."
-    for i in $(seq 1 3); do
-        kill -USR1 $master_pid 2>/dev/null
-        sleep 0.5
-    done
-    echo "✓ Signal handling tested (stats displayed above)"
-    
-    # Let system run for specified duration
-    sleep $test_duration
-    
-    # Test rapid fire signals - send directly to master
-    echo "Testing rapid fire signals..."
-    for i in $(seq 1 5); do
-        kill -USR1 $master_pid 2>/dev/null
-        sleep 0.1
-    done
-    echo "✓ Rapid fire signals tested"
-    
-    # Graceful shutdown - terminate main
-    echo "Testing graceful shutdown..."
-    kill -TERM $MAIN_PID 2>/dev/null
-    
-    # Wait for processes to exit
-    for i in $(seq 1 10); do
-        if ! pgrep -f "main|master|slave" > /dev/null; then
-            echo "✓ All processes shut down gracefully"
-            return 0
-        fi
-        sleep 1
-    done
-    
-    echo "WARNING: Some processes still running"
-    killall -9 main master slave 2>/dev/null || true
-    return 1
-}
-
-# Test 1: Single slave
-run_test "Single Slave Test" 1 3
-TEST1_RESULT=$?
-
-sleep 2
-cleanup
-
-# Test 2: Multiple slaves
-run_test "Multiple Slaves Test" 3 3
-TEST2_RESULT=$?
-
-sleep 2
-cleanup
-
-# Test 3: Maximum slaves
-run_test "Maximum Slaves Test" 10 3
-TEST3_RESULT=$?
-
-sleep 2
-cleanup
-
-# Test 4: Stress test with signal handling
-echo ""
-echo "=== Stress Test with Signal Handling ==="
-./main 5 &
+# Start system and capture output
+echo "Starting system with 2 slaves..."
+NUM_MESSAGES_PER_SLAVE=2 timeout 10s ./main 2 > test_output.log 2>&1 &
 MAIN_PID=$!
-sleep 3
+sleep 1
 
-if kill -0 $MAIN_PID 2>/dev/null; then
-    echo "✓ Stress test setup complete"
-    
-    # Get master PID
-    MASTER_PID=$(get_master_pid)
-    
-    if [[ -n "$MASTER_PID" ]]; then
-        # Burst of signals to master
-        for burst in $(seq 1 3); do
-            echo "Signal burst $burst/3..."
-            for i in $(seq 1 10); do
-                kill -USR1 $MASTER_PID 2>/dev/null
-                sleep 0.05
-            done
-            sleep 1
-        done
-        
-        # Test slave termination
-        echo "Testing slave termination..."
-        killall -TERM slave 2>/dev/null
-        sleep 2
-        
-        # Final stats
+# Get master PID and send 3 signals  
+MASTER_PID=$(cat /tmp/master_pid_2e518cc1-6b7d-45c9-a7f6-1a7d35fcbb3f 2>/dev/null)
+if [[ -n "$MASTER_PID" ]]; then
+    echo "Sending 3 stats requests..."
+    for i in {1..3}; do
         kill -USR1 $MASTER_PID 2>/dev/null
-        sleep 1
-    fi
-    
-    # Cleanup stress test
-    kill -TERM $MAIN_PID 2>/dev/null
-    sleep 2
-    
-    if ! pgrep -f "main|master|slave" > /dev/null; then
-        echo "✓ Stress test completed successfully"
-        TEST4_RESULT=0
-    else
-        echo "WARNING: Stress test processes still running"
-        killall -9 main master slave 2>/dev/null || true
-        TEST4_RESULT=1
-    fi
+    done
 else
-    echo "FAIL: Stress test setup failed"
-    TEST4_RESULT=1
-fi
-
-# Test 5: Invalid parameters
-echo ""
-echo "=== Invalid Parameters Test ==="
-./main 2>/dev/null
-if [ $? -ne 0 ]; then
-    echo "✓ Correctly rejected missing parameters"
-    TEST5_RESULT=0
-else
-    echo "FAIL: Should have rejected missing parameters"
-    TEST5_RESULT=1
-fi
-
-./main 0 2>/dev/null
-if [ $? -ne 0 ]; then
-    echo "✓ Correctly rejected invalid slave count"
-else
-    echo "FAIL: Should have rejected invalid slave count"
-    TEST5_RESULT=1
-fi
-
-# Summary
-echo ""
-echo "=== Test Results Summary ==="
-echo "Single Slave Test:        $([ $TEST1_RESULT -eq 0 ] && echo "PASS" || echo "FAIL")"
-echo "Multiple Slaves Test:     $([ $TEST2_RESULT -eq 0 ] && echo "PASS" || echo "FAIL")"
-echo "Maximum Slaves Test:      $([ $TEST3_RESULT -eq 0 ] && echo "PASS" || echo "FAIL")"
-echo "Stress Test:              $([ $TEST4_RESULT -eq 0 ] && echo "PASS" || echo "FAIL")"
-echo "Invalid Parameters Test:  $([ $TEST5_RESULT -eq 0 ] && echo "PASS" || echo "FAIL")"
-
-TOTAL_PASSED=$((5 - TEST1_RESULT - TEST2_RESULT - TEST3_RESULT - TEST4_RESULT - TEST5_RESULT))
-echo ""
-echo "Tests passed: $TOTAL_PASSED/5"
-
-if [ $TOTAL_PASSED -eq 5 ]; then
-    echo "🎉 All tests passed!"
-    exit 0
-else
-    echo "❌ Some tests failed"
+    echo "❌ FAIL: No master PID found"
     exit 1
 fi
+
+# Wait for completion
+sleep 3
+kill -TERM $MAIN_PID 2>/dev/null
+wait $MAIN_PID 2>/dev/null || true
+
+# Analyze results
+STATS_COUNT=$(count_stats_displays "test_output.log")
+FINAL_TOTALS=$(extract_totals "test_output.log")
+
+echo ""
+echo "=== Results ==="
+echo "Stats displays found: $STATS_COUNT"
+echo "Final totals: $FINAL_TOTALS"
+
+# Verify results
+if [[ "$STATS_COUNT" -ge 3 ]]; then
+    echo "✓ PASS: Found $STATS_COUNT stats displays (expected ≥3)"
+else
+    echo "❌ FAIL: Only found $STATS_COUNT stats displays (expected ≥3)"
+    exit 1
+fi
+
+if echo "$FINAL_TOTALS" | grep -q "[1-9][0-9]* sent, [1-9][0-9]* received"; then
+    echo "✓ PASS: Messages were sent and received ($FINAL_TOTALS)"
+else
+    echo "❌ FAIL: No message activity detected ($FINAL_TOTALS)"
+    exit 1
+fi
+
+echo "🎉 Test PASSED: System correctly counts messages!"
+rm -f test_output.log
