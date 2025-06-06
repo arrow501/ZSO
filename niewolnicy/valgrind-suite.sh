@@ -100,7 +100,6 @@ test_drd() {
     for burst in {1..3}; do
         for i in {1..3}; do
             kill -USR1 $MAIN_PID 2>/dev/null || true
-            sleep 0.1
         done
         sleep 0.5
     done
