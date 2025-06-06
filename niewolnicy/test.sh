@@ -17,9 +17,9 @@ echo
 echo "Test 1: Signal handling (system that runs long enough for testing)"
 echo "----------------------------------------------------------------"
 
-export NUM_MESSAGES_PER_SLAVE=500  # High enough to not exit quickly
+export NUM_MESSAGES_PER_SLAVE=5000  # High enough for your fast system
 
-echo "Starting system with 2 slaves (500 messages each)..."
+echo "Starting system with 2 slaves (5000 messages each)..."
 ./main 2 > signal_test.log 2>&1 &
 MAIN_PID=$!
 
@@ -30,7 +30,7 @@ sleep 3
 
 # Check it's actually running
 if ! kill -0 $MAIN_PID 2>/dev/null; then
-    echo "❌ System exited too early - increase NUM_MESSAGES_PER_SLAVE"
+    echo "❌ System exited too early - your system is very fast! Try 10000+ messages"
     exit 1
 fi
 
@@ -141,7 +141,7 @@ echo
 echo "Test 3: Rapid signal handling"
 echo "----------------------------"
 
-export NUM_MESSAGES_PER_SLAVE=300
+export NUM_MESSAGES_PER_SLAVE=2000
 
 echo "Starting system for rapid signal test..."
 ./main 1 > rapid_test.log 2>&1 &
