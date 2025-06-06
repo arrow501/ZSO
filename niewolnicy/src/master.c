@@ -113,11 +113,17 @@ static void handle_register(const message_t *msg) {
         close(slave_fds[id]);
     }
     
-    // Open slave FIFO
+    // Open slave FIFO - wait for it to exist
     char slave_fifo[256];
     snprintf(slave_fifo, sizeof(slave_fifo), "%s%d", SLAVE_FIFO_PREFIX, id);
     
-    slave_fds[id] = open(slave_fifo, O_WRONLY | O_NONBLOCK);
+    // Wait for slave FIFO to be created
+    for (int i = 0; i < 100; i++) {
+        if (file_exists(slave_fifo)) break;
+        for (volatile int j = 0; j < 10000; j++);
+    }
+    
+    slave_fds[id] = open(slave_fifo, O_WRONLY);
     if (slave_fds[id] < 0) {
         perror("open slave FIFO");
         return;
@@ -225,8 +231,10 @@ int main(void) {
     signal(SIGPIPE, SIG_IGN);
     atexit(cleanup);
     
-    // Setup IPC
+    // Write PID file FIRST so main can find it
     write_pid_file();
+    
+    // Setup IPC
     setup_shared_memory();
     
     // Create master FIFO

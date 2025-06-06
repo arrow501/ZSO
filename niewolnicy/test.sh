@@ -20,7 +20,7 @@ cleanup
 
 echo "Building system..."
 make clean > /dev/null 2>&1
-make > /dev/null 2>&1
+make debug > /dev/null 2>&1
 
 if [[ ! -x "./main" ]]; then
     echo "❌ Build failed"

@@ -105,12 +105,18 @@ int main(int argc, char *argv[]) {
     signal(SIGPIPE, SIG_IGN);
     atexit(cleanup);
     
-    // Create slave FIFO
+    // Create slave FIFO FIRST
     snprintf(slave_fifo, sizeof(slave_fifo), "%s%d", SLAVE_FIFO_PREFIX, slave_id);
     unlink(slave_fifo);
     if (mkfifo(slave_fifo, 0666) != 0) {
         perror("mkfifo");
         return 1;
+    }
+    
+    // Wait for master FIFO to exist
+    for (int i = 0; i < 100; i++) {
+        if (file_exists(MASTER_FIFO)) break;
+        for (volatile int j = 0; j < 10000; j++);
     }
     
     // Connect to master
@@ -120,11 +126,11 @@ int main(int argc, char *argv[]) {
         return 1;
     }
     
-    // Register with master
+    // Register with master BEFORE opening our FIFO for reading
     register_with_master();
     
-    // Open slave FIFO for reading
-    slave_fd = open(slave_fifo, O_RDONLY | O_NONBLOCK);
+    // Now open slave FIFO for reading (this will block until master opens for writing)
+    slave_fd = open(slave_fifo, O_RDONLY);
     if (slave_fd < 0) {
         perror("open slave FIFO");
         return 1;
@@ -143,6 +149,9 @@ int main(int argc, char *argv[]) {
             process_query(&msg);
         } else if (bytes == 0) {
             // Master disconnected
+            break;
+        } else if (bytes < 0 && errno != EAGAIN && errno != EWOULDBLOCK) {
+            // Real error
             break;
         }
         
