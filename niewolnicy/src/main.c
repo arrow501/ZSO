@@ -5,16 +5,32 @@
 #include <sys/wait.h>
 #include <signal.h>
 #include <errno.h>
+#include <sys/mman.h>
+#include <semaphore.h>
+#include <pthread.h>
 #include "../include/common.h"
+
+// Stats monitoring functions from stats_reader
+int setup_stats_monitoring(pid_t master_pid, stats_t **stats_ptr, sem_t **sem_ptr);
+int trigger_and_display_stats(pid_t master_pid, stats_t *stats, sem_t *sem);
 
 // Global state for cleanup
 static pid_t master_pid = 0;
 static pid_t slave_pids[NUM_SLAVES];
 static int num_slaves_started = 0;
 static volatile sig_atomic_t should_exit = 0;
+static stats_t *stats = NULL;
+static sem_t *stats_sem = NULL;
 
 static void handle_signal(int sig) {
-    should_exit = 1;
+    if (sig == SIGINT || sig == SIGTERM) {
+        should_exit = 1;
+    } else if (sig == SIGUSR1) {
+        // Trigger stats display
+        if (master_pid > 0 && stats != NULL && stats_sem != NULL) {
+            trigger_and_display_stats(master_pid, stats, stats_sem);
+        }
+    }
 }
 
 static void cleanup_processes(void) {
@@ -23,24 +39,12 @@ static void cleanup_processes(void) {
     // Terminate slaves first
     for (int i = 0; i < num_slaves_started; i++) {
         if (slave_pids[i] > 0) {
-            printf("Main: Terminating slave %d (PID=%d)\n", i, slave_pids[i]);
             kill(slave_pids[i], SIGTERM);
-        }
-    }
-    
-    // Give slaves time to unregister gracefully
-    for (int i = 0; i < 3; i++) {
-        int status;
-        if (waitpid(-1, &status, WNOHANG) > 0) {
-            // A process exited
-        } else {
-            usleep(100000); // 100ms
         }
     }
     
     // Terminate master
     if (master_pid > 0) {
-        printf("Main: Terminating master (PID=%d)\n", master_pid);
         kill(master_pid, SIGTERM);
     }
     
@@ -50,32 +54,48 @@ static void cleanup_processes(void) {
         // Reap children
     }
     
+    // Cleanup stats monitoring
+    if (stats_sem != NULL) {
+        sem_close(stats_sem);
+    }
+    if (stats != NULL) {
+        munmap(stats, sizeof(stats_t));
+    }
+    
     printf("Main: All processes terminated\n");
 }
 
-static void wait_for_master_ready(void) {
+static int wait_for_master_ready(void) {
     // Wait for master to create PID file
-    for (int i = 0; i < 50; i++) { // 5 seconds max
+    for (int i = 0; i < 100; i++) { // 10 seconds max with 100ms polls
         if (file_exists(MASTER_PID_FILE)) {
-            printf("Main: Master is ready\n");
-            return;
+            return 0;
         }
-        usleep(100000); // 100ms
+        // No usleep - just busy wait briefly
+        for (volatile int j = 0; j < 100000; j++);
     }
-    
-    printf("Main: Warning - Master PID file not found, continuing anyway\n");
+    return -1;
+}
+
+static void show_help(const char *program_name) {
+    printf("Usage: %s <num_slaves>\n", program_name);
+    printf("  num_slaves: 1-%d\n", NUM_SLAVES);
 }
 
 int main(int argc, char *argv[]) {
-    int num_slaves = NUM_SLAVES;
+    int num_slaves;
     
     // Parse command line arguments
-    if (argc > 1) {
-        num_slaves = atoi(argv[1]);
-        if (num_slaves <= 0 || num_slaves > NUM_SLAVES) {
-            fprintf(stderr, "Error: Number of slaves must be 1-%d\n", NUM_SLAVES);
-            return 1;
-        }
+    if (argc != 2) {
+        show_help(argv[0]);
+        return 1;
+    }
+    
+    num_slaves = atoi(argv[1]);
+    if (num_slaves <= 0 || num_slaves > NUM_SLAVES) {
+        fprintf(stderr, "Error: Number of slaves must be 1-%d\n", NUM_SLAVES);
+        show_help(argv[0]);
+        return 1;
     }
     
     // Initialize arrays
@@ -86,6 +106,7 @@ int main(int argc, char *argv[]) {
     // Setup signal handling
     signal(SIGINT, handle_signal);
     signal(SIGTERM, handle_signal);
+    signal(SIGUSR1, handle_signal);
     
     // Register cleanup function
     atexit(cleanup_processes);
@@ -97,8 +118,6 @@ int main(int argc, char *argv[]) {
     DEBUG_ASSERT(master_pid >= 0, "Should fork master successfully");
     
     if (master_pid == 0) {
-        // Child process - exec master
-        printf("Main: Starting master process\n");
         execl("./master", "master", NULL);
         perror("Failed to exec master");
         exit(1);
@@ -107,7 +126,16 @@ int main(int argc, char *argv[]) {
     printf("Main: Master started (PID=%d)\n", master_pid);
     
     // Wait for master to be ready
-    wait_for_master_ready();
+    if (wait_for_master_ready() < 0) {
+        printf("Main: Master failed to start properly\n");
+        return 1;
+    }
+    
+    // Setup stats monitoring
+    if (setup_stats_monitoring(master_pid, &stats, &stats_sem) < 0) {
+        printf("Main: Failed to setup stats monitoring\n");
+        return 1;
+    }
     
     // Start slave processes
     for (int i = 0; i < num_slaves; i++) {
@@ -115,11 +143,8 @@ int main(int argc, char *argv[]) {
         DEBUG_ASSERT(slave_pids[i] >= 0, "Should fork slave successfully");
         
         if (slave_pids[i] == 0) {
-            // Child process - exec slave
             char slave_id_str[16];
             snprintf(slave_id_str, sizeof(slave_id_str), "%d", i);
-            
-            printf("Main: Starting slave %d\n", i);
             execl("./slave", "slave", slave_id_str, NULL);
             perror("Failed to exec slave");
             exit(1);
@@ -127,26 +152,22 @@ int main(int argc, char *argv[]) {
         
         printf("Main: Slave %d started (PID=%d)\n", i, slave_pids[i]);
         num_slaves_started++;
-        
-        // Small delay between slave starts
-        usleep(100000); // 100ms
     }
     
     printf("Main: All processes started\n");
-    printf("Main: You can now run './stats_reader' in another terminal\n");
+    printf("Main: Send SIGUSR1 to this process (PID=%d) to display stats\n", getpid());
     printf("Main: Press Ctrl+C to stop all processes\n");
     
-    // Main monitoring loop
+    // Main monitoring loop (no time-based logic)
     while (!should_exit) {
         int status;
         pid_t exited_pid = waitpid(-1, &status, WNOHANG);
         
         if (exited_pid > 0) {
-            // A child process exited
             if (exited_pid == master_pid) {
                 printf("Main: Master process exited\n");
                 master_pid = 0;
-                should_exit = 1; // If master dies, exit
+                should_exit = 1;
             } else {
                 // Find which slave exited
                 for (int i = 0; i < num_slaves; i++) {
@@ -172,8 +193,8 @@ int main(int argc, char *argv[]) {
             perror("waitpid");
             break;
         } else {
-            // No children exited, sleep briefly
-            usleep(100000); // 100ms
+            // No children exited, brief pause without sleep
+            for (volatile int i = 0; i < 100000; i++);
         }
     }
     

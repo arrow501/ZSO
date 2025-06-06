@@ -29,16 +29,13 @@ ifdef NUM_MESSAGES_PER_SLAVE
     CFLAGS += -DNUM_MESSAGES_PER_SLAVE=$(NUM_MESSAGES_PER_SLAVE)
 endif
 
-all: master slave stats_reader
+all: master slave main
 
 master: $(SRCDIR)/master.c include/common.h include/parameters.h
 	$(CC) $(CFLAGS) $(INCLUDES) -o master $(SRCDIR)/master.c $(LDFLAGS)
 
 slave: $(SRCDIR)/slave.c include/common.h include/parameters.h
 	$(CC) $(CFLAGS) $(INCLUDES) -o slave $(SRCDIR)/slave.c $(LDFLAGS)
-
-stats_reader: $(SRCDIR)/stats_reader.c include/common.h include/parameters.h
-	$(CC) $(CFLAGS) $(INCLUDES) -o stats_reader $(SRCDIR)/stats_reader.c $(LDFLAGS)
 
 # Debug build (default)
 debug: DEBUG=1
@@ -56,13 +53,13 @@ large: NUM_SLAVES=10 NUM_MESSAGES_PER_SLAVE=20
 large: debug
 
 clean:
-	rm -f master slave stats_reader main
-	rm -f /tmp/master_fifo /tmp/slave_fifo_* /tmp/master_pid
-	rm -f /dev/shm/master_stats /dev/shm/sem.stats_ready
+	rm -f master slave main
+	rm -f /tmp/master_fifo_* /tmp/slave_fifo_* /tmp/master_pid_*
+	rm -f /dev/shm/master_stats_* /dev/shm/sem.stats_ready_*
 
-# Main launcher
-main: $(SRCDIR)/main.c include/common.h include/parameters.h
-	$(CC) $(CFLAGS) $(INCLUDES) -o main $(SRCDIR)/main.c $(LDFLAGS)
+# Main launcher (no separate stats_reader needed)
+main: $(SRCDIR)/main.c $(SRCDIR)/stats_reader.c include/common.h include/parameters.h
+	$(CC) $(CFLAGS) $(INCLUDES) -o main $(SRCDIR)/main.c $(SRCDIR)/stats_reader.c $(LDFLAGS)
 
 # Quick test with main launcher
 test: debug main

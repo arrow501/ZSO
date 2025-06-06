@@ -269,7 +269,7 @@ int main(void) {
             }
         }
         
-        // Send periodic queries 
+        // Send periodic queries (simplified - no time dependency)
         static int poll_count = 0;
         if (++poll_count >= (QUERY_INTERVAL_MS / POLL_TIMEOUT_MS)) {
             send_queries();

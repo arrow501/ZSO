@@ -32,9 +32,9 @@
 #define POLL_TIMEOUT_MS 100
 #endif
 
-/** Query interval in milliseconds */
-#ifndef QUERY_INTERVAL_MS
-#define QUERY_INTERVAL_MS 1000
+/** System UUID for unique IPC resource names */
+#ifndef SYSTEM_UUID
+#define SYSTEM_UUID "2e518cc1-6b7d-45c9-a7f6-1a7d35fcbb3f"
 #endif
 
 #endif /* PARAMETERS_H */

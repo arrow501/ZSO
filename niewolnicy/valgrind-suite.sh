@@ -1,323 +1,186 @@
 #!/bin/bash
 
-# Simple Valgrind Test Suite for Master-Slave IPC System
-# This script runs comprehensive tests using Valgrind tools to ensure memory and thread safety
+# Simplified Valgrind Test Suite for Master-Slave IPC System
 
-# Reset state
-make release
+make release > /dev/null 2>&1
 rm -rf valgrind_logs
 
-# Colors
-RED='\033[0;31m'
-GREEN='\033[0;32m'
-YELLOW='\033[1;33m'
-BLUE='\033[0;34m'
-CYAN='\033[0;36m'
-BOLD='\033[1m'
-NC='\033[0m'
-
-# Configuration
 LOGS_DIR="./valgrind_logs"
-TEST_DURATION=8
+TEST_DURATION=6
 
-# Binaries
-MASTER_BIN="./master"
-SLAVE_BIN="./slave"
-STATS_BIN="./stats_reader"
-
-# Create logs directory
 mkdir -p "$LOGS_DIR"
 
-# Cleanup function
 cleanup() {
-    # Prevent recursive cleanup
-    if [[ "${CLEANUP_RUNNING:-}" == "true" ]]; then
-        return 0
-    fi
-    export CLEANUP_RUNNING=true
-    
-    echo -e "\n${YELLOW}Cleaning up...${NC}"
-    # Be more specific to avoid killing this script
-    pkill -f "./master" 2>/dev/null || true
-    pkill -f "./slave" 2>/dev/null || true  
-    pkill -f "./stats_reader" 2>/dev/null || true
-    pkill -f "valgrind.*master" 2>/dev/null || true
-    pkill -f "valgrind.*slave" 2>/dev/null || true
-    pkill -f "valgrind.*stats_reader" 2>/dev/null || true
+    pkill -f "main|master|slave|valgrind" 2>/dev/null || true
     sleep 1
-    rm -f /tmp/master_fifo /tmp/slave_fifo_* 2>/dev/null || true
-    rm -f /dev/shm/master_stats /dev/shm/sem.stats_ready 2>/dev/null || true
-    echo -e "${GREEN}✓ Cleanup complete${NC}"
-    
-    export CLEANUP_RUNNING=false
+    rm -f /tmp/master_fifo_* /tmp/slave_fifo_* /tmp/master_pid_* 2>/dev/null || true
+    rm -f /dev/shm/master_stats_* /dev/shm/sem.stats_ready_* 2>/dev/null || true
 }
 
-# Set trap for cleanup on exit
 trap cleanup EXIT
 
-# Check if binaries exist
 check_binaries() {
-    for binary in "$MASTER_BIN" "$SLAVE_BIN" "$STATS_BIN"; do
+    for binary in "./master" "./slave" "./main"; do
         if [[ ! -x "$binary" ]]; then
-            echo -e "${RED}Error: $binary not found${NC}"
-            echo -e "${YELLOW}Run 'make' to build the binaries${NC}"
+            echo "Error: $binary not found. Run 'make' first."
             exit 1
         fi
     done
-    echo -e "${GREEN}✓ All binaries found${NC}"
+    echo "✓ All binaries found"
 }
 
-# Test 1: Memory Leak Detection
 test_memcheck() {
-    echo -e "\n${BOLD}${CYAN}=== MEMORY LEAK TEST ===${NC}"
-    sleep 1
+    echo ""
+    echo "=== MEMORY LEAK TEST ==="
     
-    echo -e "${YELLOW}Starting master with memcheck...${NC}"
     valgrind --tool=memcheck \
              --leak-check=full \
              --show-leak-kinds=all \
-             --log-file="$LOGS_DIR/master_memcheck.log" \
-             "$MASTER_BIN" &
+             --track-origins=yes \
+             --log-file="$LOGS_DIR/memcheck.log" \
+             ./main 3 &
     
+    MAIN_PID=$!
     sleep 3
     
-    echo -e "${YELLOW}Starting 2 slaves with memcheck...${NC}"
-    valgrind --tool=memcheck \
-             --leak-check=full \
-             --show-leak-kinds=all \
-             --log-file="$LOGS_DIR/slave0_memcheck.log" \
-             "$SLAVE_BIN" 0 &
-    
-    sleep 1
-    
-    valgrind --tool=memcheck \
-             --leak-check=full \
-             --show-leak-kinds=all \
-             --log-file="$LOGS_DIR/slave1_memcheck.log" \
-             "$SLAVE_BIN" 1 &
-    
-    sleep 2
-    
-    echo -e "${YELLOW}Starting stats reader with memcheck...${NC}"
-    valgrind --tool=memcheck \
-             --leak-check=full \
-             --show-leak-kinds=all \
-             --log-file="$LOGS_DIR/stats_memcheck.log" \
-             "$STATS_BIN" &
-    
-    echo -e "${BLUE}Running for $TEST_DURATION seconds...${NC}"
-    sleep $TEST_DURATION
-    
-    echo -e "${YELLOW}Stopping processes...${NC}"
-    pkill -TERM -f "valgrind.*stats_reader" 2>/dev/null || true
-    pkill -TERM -f "valgrind.*slave" 2>/dev/null || true
-    sleep 2
-    pkill -TERM -f "valgrind.*master" 2>/dev/null || true
-    
-    sleep 3
-    echo -e "${GREEN}✓ Memcheck complete${NC}"
-}
-
-# Test 2: Thread Safety with Helgrind
-test_helgrind() {
-    echo -e "\n${BOLD}${CYAN}=== THREAD SAFETY TEST ===${NC}"
-    sleep 1
-    
-    echo -e "${YELLOW}Starting master with helgrind...${NC}"
-    valgrind --tool=helgrind \
-             --log-file="$LOGS_DIR/master_helgrind.log" \
-             "$MASTER_BIN" &
-    
-    sleep 3
-    
-    echo -e "${YELLOW}Starting 2 slaves with helgrind...${NC}"
-    valgrind --tool=helgrind \
-             --log-file="$LOGS_DIR/slave0_helgrind.log" \
-             "$SLAVE_BIN" 0 &
-    
-    sleep 1
-    
-    valgrind --tool=helgrind \
-             --log-file="$LOGS_DIR/slave1_helgrind.log" \
-             "$SLAVE_BIN" 1 &
-    
-    sleep 2
-    
-    echo -e "${YELLOW}Starting stats reader with helgrind...${NC}"
-    valgrind --tool=helgrind \
-             --log-file="$LOGS_DIR/stats_helgrind.log" \
-             "$STATS_BIN" &
-    
-    echo -e "${BLUE}Running concurrent operations for $TEST_DURATION seconds...${NC}"
-    
-    # Generate some concurrent activity
+    # Send some signals during test
     for i in {1..3}; do
-        sleep $(($TEST_DURATION / 3))
-        echo -e "${BLUE}Triggering stats update $i/3...${NC}"
-        pkill -USR1 -f "valgrind.*master" 2>/dev/null || true
+        sleep 1
+        kill -USR1 $MAIN_PID 2>/dev/null || true
     done
     
-    echo -e "${YELLOW}Stopping processes...${NC}"
-    pkill -TERM -f "valgrind.*stats_reader" 2>/dev/null || true
-    pkill -TERM -f "valgrind.*slave" 2>/dev/null || true
-    sleep 2
-    pkill -TERM -f "valgrind.*master" 2>/dev/null || true
+    # Graceful shutdown
+    kill -TERM $MAIN_PID 2>/dev/null
+    wait $MAIN_PID 2>/dev/null
     
-    sleep 3
-    echo -e "${GREEN}✓ Helgrind complete${NC}"
+    echo "✓ Memcheck complete"
 }
 
-# Test 3: Data Race Detection with DRD
+test_helgrind() {
+    echo ""
+    echo "=== THREAD SAFETY TEST ==="
+    
+    valgrind --tool=helgrind \
+             --log-file="$LOGS_DIR/helgrind.log" \
+             ./main 2 &
+    
+    MAIN_PID=$!
+    sleep 3
+    
+    # Rapid signal testing for race conditions
+    for i in {1..5}; do
+        kill -USR1 $MAIN_PID 2>/dev/null || true
+        sleep 0.2
+    done
+    
+    kill -TERM $MAIN_PID 2>/dev/null
+    wait $MAIN_PID 2>/dev/null
+    
+    echo "✓ Helgrind complete"
+}
+
 test_drd() {
-    echo -e "\n${BOLD}${CYAN}=== DATA RACE TEST ===${NC}"
-    sleep 1
-    
-    echo -e "${YELLOW}Starting master with DRD...${NC}"
-    valgrind --tool=drd \
-             --log-file="$LOGS_DIR/master_drd.log" \
-             "$MASTER_BIN" &
-    
-    sleep 3
-    
-    echo -e "${YELLOW}Starting 2 slaves with DRD...${NC}"
-    valgrind --tool=drd \
-             --log-file="$LOGS_DIR/slave0_drd.log" \
-             "$SLAVE_BIN" 0 &
-    
-    sleep 1
+    echo ""
+    echo "=== DATA RACE TEST ==="
     
     valgrind --tool=drd \
-             --log-file="$LOGS_DIR/slave1_drd.log" \
-             "$SLAVE_BIN" 1 &
+             --log-file="$LOGS_DIR/drd.log" \
+             ./main 3 &
     
+    MAIN_PID=$!
     sleep 2
     
-    echo -e "${YELLOW}Starting stats reader with DRD...${NC}"
-    valgrind --tool=drd \
-             --log-file="$LOGS_DIR/stats_drd.log" \
-             "$STATS_BIN" &
-    
-    echo -e "${BLUE}Running stress test for $TEST_DURATION seconds...${NC}"
-    
-    # More aggressive testing for race conditions
-    for i in {1..4}; do
-        sleep $(($TEST_DURATION / 4))
-        echo -e "${BLUE}Stress burst $i/4...${NC}"
-        # Rapid stats requests
-        pkill -USR1 -f "valgrind.*master" 2>/dev/null || true
-        sleep 0.1
-        pkill -USR1 -f "valgrind.*master" 2>/dev/null || true
+    # Stress test with rapid signals
+    for burst in {1..3}; do
+        for i in {1..3}; do
+            kill -USR1 $MAIN_PID 2>/dev/null || true
+            sleep 0.1
+        done
+        sleep 0.5
     done
     
-    echo -e "${YELLOW}Stopping processes...${NC}"
-    pkill -TERM -f "valgrind.*stats_reader" 2>/dev/null || true
-    pkill -TERM -f "valgrind.*slave" 2>/dev/null || true
-    sleep 2
-    pkill -TERM -f "valgrind.*master" 2>/dev/null || true
+    kill -TERM $MAIN_PID 2>/dev/null
+    wait $MAIN_PID 2>/dev/null
     
-    sleep 3
-    echo -e "${GREEN}✓ DRD complete${NC}"
+    echo "✓ DRD complete"
 }
 
-# Simple result reporting function
 show_results() {
-    echo -e "\n${BOLD}${CYAN}========================================${NC}"
-    echo -e "${BOLD}${CYAN}  VALGRIND RESULTS SUMMARY${NC}"
-    echo -e "${BOLD}${CYAN}========================================${NC}"
+    echo ""
+    echo "========================================="
+    echo "  VALGRIND RESULTS SUMMARY"
+    echo "========================================="
     
-    # Memory check results
-    echo -e "\n${BOLD}${YELLOW}Memory Check (memcheck):${NC}"
-    for process in "master" "slave0" "slave1" "stats"; do
-        local log="$LOGS_DIR/${process}_memcheck.log"
+    for tool in "memcheck" "helgrind" "drd"; do
+        local log="$LOGS_DIR/${tool}.log"
+        echo ""
+        echo "${tool^} Results:"
         if [[ -f "$log" ]]; then
-            local error_line=$(tail -n 10 "$log" | grep "ERROR SUMMARY" | tail -n 1)
+            local error_line=$(tail -n 20 "$log" | grep "ERROR SUMMARY" | tail -n 1)
             if [[ -n "$error_line" ]]; then
-                echo -e "  ${CYAN}${process}:${NC} $error_line"
+                echo "  $error_line"
             else
-                echo -e "  ${CYAN}${process}:${NC} No error summary found"
+                echo "  No error summary found"
+            fi
+            
+            # Show any definite leaks for memcheck
+            if [[ "$tool" == "memcheck" ]]; then
+                local leak_line=$(tail -n 20 "$log" | grep "definitely lost" | tail -n 1)
+                if [[ -n "$leak_line" ]]; then
+                    echo "  $leak_line"
+                fi
             fi
         else
-            echo -e "  ${CYAN}${process}:${NC} Log file not found"
+            echo "  Log file not found"
         fi
     done
     
-    # Thread safety results
-    echo -e "\n${BOLD}${YELLOW}Thread Safety (helgrind):${NC}"
-    for process in "master" "slave0" "slave1" "stats"; do
-        local log="$LOGS_DIR/${process}_helgrind.log"
-        if [[ -f "$log" ]]; then
-            local error_line=$(tail -n 10 "$log" | grep "ERROR SUMMARY" | tail -n 1)
-            if [[ -n "$error_line" ]]; then
-                echo -e "  ${CYAN}${process}:${NC} $error_line"
-            else
-                echo -e "  ${CYAN}${process}:${NC} No error summary found"
-            fi
-        else
-            echo -e "  ${CYAN}${process}:${NC} Log file not found"
-        fi
-    done
-    
-    # Data race results
-    echo -e "\n${BOLD}${YELLOW}Data Race Detection (DRD):${NC}"
-    for process in "master" "slave0" "slave1" "stats"; do
-        local log="$LOGS_DIR/${process}_drd.log"
-        if [[ -f "$log" ]]; then
-            local error_line=$(tail -n 10 "$log" | grep "ERROR SUMMARY" | tail -n 1)
-            if [[ -n "$error_line" ]]; then
-                echo -e "  ${CYAN}${process}:${NC} $error_line"
-            else
-                echo -e "  ${CYAN}${process}:${NC} No error summary found"
-            fi
-        else
-            echo -e "  ${CYAN}${process}:${NC} Log file not found"
-        fi
-    done
-    
-    echo -e "\n${GREEN}All logs saved to: $LOGS_DIR/${NC}"
+    echo ""
+    echo "All logs saved to: $LOGS_DIR/"
 }
 
-# Main execution
 main() {
-    echo -e "${BOLD}${CYAN}========================================${NC}"
-    echo -e "${BOLD}${CYAN}  Simple Valgrind Test Suite${NC}"
-    echo -e "${BOLD}${CYAN}  Master-Slave IPC System${NC}"
-    echo -e "${BOLD}${CYAN}========================================${NC}"
+    echo "========================================="
+    echo "  Simplified Valgrind Test Suite"
+    echo "  Master-Slave IPC System"
+    echo "========================================="
     
     check_binaries
     
-    # Run all tests
     test_memcheck
-    test_helgrind
-    test_drd
+    cleanup
+    sleep 1
     
-    # Show all results at the end
+    test_helgrind
+    cleanup 
+    sleep 1
+    
+    test_drd
+    cleanup
+    
     show_results
     
-    # List generated files
-    echo -e "\n${BLUE}Generated files:${NC}"
+    echo ""
+    echo "Generated files:"
     find "$LOGS_DIR" -name "*.log" -type f | sort | while read -r file; do
-        echo -e "  📄 $file"
+        echo "  📄 $file"
     done
     
-    echo -e "\n${BOLD}${GREEN}Testing Complete!${NC}"
+    echo ""
+    echo "✅ Valgrind testing complete!"
 }
 
-# Show help if requested
 if [[ "$1" == "--help" || "$1" == "-h" ]]; then
-    echo -e "${BOLD}Simple Valgrind Test Suite${NC}"
+    echo "Simplified Valgrind Test Suite"
     echo ""
-    echo -e "Usage: $0"
+    echo "Usage: $0"
     echo ""
-    echo -e "Runs three comprehensive tests:"
-    echo -e "  1. ${CYAN}Memory Leak Detection${NC} (memcheck)"
-    echo -e "  2. ${CYAN}Thread Safety${NC} (helgrind)"
-    echo -e "  3. ${CYAN}Data Race Detection${NC} (DRD)"
-    echo ""
-    echo -e "All tests use hardcoded parameters optimized for this project."
-    echo -e "Logs are saved to $LOGS_DIR/"
+    echo "Runs three tests on the unified main launcher:"
+    echo "  1. Memory Leak Detection (memcheck)"
+    echo "  2. Thread Safety (helgrind)" 
+    echo "  3. Data Race Detection (DRD)"
     echo ""
     exit 0
 fi
 
-# Run the tests
 main

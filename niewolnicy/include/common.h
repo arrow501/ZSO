@@ -22,12 +22,12 @@
     #define DEBUG_ASSERT(cond, msg) ((void)0)
 #endif
 
-// System paths
-#define MASTER_FIFO "/tmp/master_fifo"
-#define SLAVE_FIFO_PREFIX "/tmp/slave_fifo_"
-#define MASTER_PID_FILE "/tmp/master_pid"
-#define SHM_NAME "/master_stats"
-#define SEM_NAME "/stats_ready"
+// System paths with UUID
+#define MASTER_FIFO "/tmp/master_fifo_" SYSTEM_UUID
+#define SLAVE_FIFO_PREFIX "/tmp/slave_fifo_" SYSTEM_UUID "_"
+#define MASTER_PID_FILE "/tmp/master_pid_" SYSTEM_UUID
+#define SHM_NAME "/master_stats_" SYSTEM_UUID  
+#define SEM_NAME "/stats_ready_" SYSTEM_UUID
 
 // Message types
 typedef enum {
