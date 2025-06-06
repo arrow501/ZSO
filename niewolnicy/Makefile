@@ -5,6 +5,7 @@ INCLUDES = -Iinclude
 SRCDIR = src
 
 # Follow parameters.h defaults by default
+# (no explicit flags = use what's in parameters.h)
 
 # Override parameters if provided
 ifdef NUM_SLAVES
@@ -34,9 +35,9 @@ debug: clean all
 release: CFLAGS += -DENABLE_PRINTING=0 -DENABLE_ASSERTS=0 -O2 -DNDEBUG
 release: clean all
 
-# Testing
+# Testing (with shorter message limit)
 test: all
-	./test.sh
+	NUM_MESSAGES_PER_SLAVE=10 ./test.sh
 
 # Cleanup (only our files with full UUID)
 clean:

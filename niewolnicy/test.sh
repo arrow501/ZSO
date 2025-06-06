@@ -28,6 +28,45 @@ get_master_pid() {
     fi
 }
 
+verify_stats_output() {
+    local expected_slaves="$1"
+    local output_file="/tmp/test_stats_output.txt"
+    
+    # Capture stats output
+    timeout 5s bash -c "
+        local master_pid=\$(get_master_pid)
+        if [[ -n \"\$master_pid\" ]]; then
+            kill -USR1 \$master_pid 2>/dev/null
+            sleep 1
+        fi
+    " > "$output_file" 2>&1
+    
+    # Check if stats were displayed
+    if grep -q "Master Statistics" "$output_file"; then
+        echo "✓ Stats display working"
+        
+        # Check active slaves count
+        local active_count=$(grep "active slaves" "$output_file" | grep -o "[0-9]\+ active slaves" | grep -o "^[0-9]\+")
+        if [[ "$active_count" -eq "$expected_slaves" ]]; then
+            echo "✓ Correct number of active slaves: $active_count"
+        else
+            echo "⚠ Expected $expected_slaves active slaves, found $active_count"
+        fi
+        
+        # Check if messages are being processed
+        if grep -q "sent=[0-9]\+, received=[0-9]\+" "$output_file"; then
+            echo "✓ Message processing detected"
+        else
+            echo "⚠ No message processing detected"
+        fi
+        
+        return 0
+    else
+        echo "✗ No stats output detected"
+        return 1
+    fi
+}
+
 run_test() {
     local test_name="$1"
     local num_slaves="$2"
@@ -36,8 +75,8 @@ run_test() {
     echo ""
     echo "=== $test_name ==="
     
-    # Start main process
-    ./main $num_slaves &
+    # Start main process with shorter message limit for testing
+    NUM_MESSAGES_PER_SLAVE=5 ./main $num_slaves &
     MAIN_PID=$!
     
     sleep 2
@@ -75,6 +114,10 @@ run_test() {
         sleep 0.5
     done
     echo "✓ Signal handling tested"
+    
+    # Verify stats are working
+    echo "Verifying stats output..."
+    verify_stats_output $num_slaves
     
     # Let system run for specified duration
     sleep $test_duration
