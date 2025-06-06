@@ -269,9 +269,9 @@ int main(void) {
             }
         }
         
-        // Send periodic queries (simplified - no time dependency)
+        // Send periodic queries (poll-count based, no time logic)
         static int poll_count = 0;
-        if (++poll_count >= (QUERY_INTERVAL_MS / POLL_TIMEOUT_MS)) {
+        if (++poll_count >= 10) { // Every 10 poll cycles
             send_queries();
             poll_count = 0;
         }
