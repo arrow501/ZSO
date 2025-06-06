@@ -28,7 +28,7 @@ if [[ ! -x "./main" ]]; then
 fi
 
 echo "Starting system with 2 slaves..."
-# Capture ALL output to a log file
+# Use reasonable message count for testing
 NUM_MESSAGES_PER_SLAVE=20 ./main 2 > output.log 2>&1 &
 MAIN_PID=$!
 

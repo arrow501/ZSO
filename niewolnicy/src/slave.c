@@ -19,6 +19,9 @@ static char slave_fifo[256];
 static void handle_signal(int sig) {
     if (sig == SIGTERM || sig == SIGINT) {
         should_exit = 1;
+    } else if (sig == SIGUSR1) {
+        // Signal to slave causes it to notify master it's finishing
+        should_exit = 1;
     }
 }
 
@@ -102,6 +105,7 @@ int main(int argc, char *argv[]) {
     // Setup signal handling
     signal(SIGTERM, handle_signal);
     signal(SIGINT, handle_signal);
+    signal(SIGUSR1, handle_signal);  // Signal to slave → notify master finishing
     signal(SIGPIPE, SIG_IGN);
     atexit(cleanup);
     

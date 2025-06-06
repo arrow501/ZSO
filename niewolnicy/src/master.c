@@ -7,11 +7,10 @@
 #include <sys/stat.h>
 #include <sys/mman.h>
 #include <errno.h>
-#include <semaphore.h>
 #include <pthread.h>
 #include "../include/common.h"
 
-// Global state - keep it minimal
+// Global state - minimal as requested
 static int master_fd = -1;
 static int slave_fds[MAX_SLAVES];
 static stats_t *stats = NULL;
@@ -22,7 +21,7 @@ static void handle_signal(int sig) {
     if (sig == SIGINT || sig == SIGTERM) {
         should_exit = 1;
     } else if (sig == SIGUSR1) {
-        // Simply increment counter - atomic on most platforms
+        // Simply increment counter - atomic
         stats_requests++;
     }
 }
@@ -35,10 +34,13 @@ static void write_pid_file(void) {
     }
     fprintf(f, "%d\n", getpid());
     fclose(f);
+    
+#if ENABLE_PRINTING
+    printf("Master PID %d written to %s\n", getpid(), MASTER_PID_FILE);
+#endif
 }
 
 static void setup_shared_memory(void) {
-    // Clean up any old shared memory
     shm_unlink(SHM_NAME);
     
     int shm_fd = shm_open(SHM_NAME, O_CREAT | O_RDWR | O_EXCL, 0666);
@@ -113,11 +115,11 @@ static void handle_register(const message_t *msg) {
         close(slave_fds[id]);
     }
     
-    // Open slave FIFO - wait for it to exist
+    // Open slave FIFO
     char slave_fifo[256];
     snprintf(slave_fifo, sizeof(slave_fifo), "%s%d", SLAVE_FIFO_PREFIX, id);
     
-    // Wait for slave FIFO to be created
+    // Wait for slave FIFO to exist
     for (int i = 0; i < 100; i++) {
         if (file_exists(slave_fifo)) break;
         for (volatile int j = 0; j < 10000; j++);
@@ -166,7 +168,7 @@ static void handle_response(const message_t *msg) {
     pthread_mutex_unlock(&stats->mutex);
 }
 
-static void send_queries(void) {
+static void send_single_query_to_all_active_slaves(void) {
     static int query_counter = 0;
     query_counter++;
     
@@ -193,6 +195,10 @@ static void send_queries(void) {
             pthread_mutex_unlock(&stats->mutex);
         }
     }
+    
+#if ENABLE_PRINTING
+    printf("Master: Sent query %d to active slaves\n", query_counter);
+#endif
 }
 
 static void cleanup(void) {
@@ -231,7 +237,7 @@ int main(void) {
     signal(SIGPIPE, SIG_IGN);
     atexit(cleanup);
     
-    // Write PID file FIRST so main can find it
+    // Write PID file FIRST
     write_pid_file();
     
     // Setup IPC
@@ -252,20 +258,21 @@ int main(void) {
     
 #if ENABLE_PRINTING
     printf("Master: Started (PID=%d)\n", getpid());
-#endif    
-    // Main loop - much simpler!
+    printf("Master: Send SIGUSR1 to display stats\n");
+#endif
+    
+    // SIMPLE main loop - following polecenie exactly
     while (!should_exit) {
-        // Check for pending stats requests
+        // 1. Check for pending stats requests (simplified signal handling)
         sig_atomic_t pending_requests = stats_requests;
         if (pending_requests > 0) {
-            // Display stats for each pending request
             for (sig_atomic_t i = 0; i < pending_requests; i++) {
                 display_stats();
             }
-            // Atomically subtract the requests we just processed
             stats_requests -= pending_requests;
         }
-          // Check for messages from slaves
+        
+        // 2. Check for messages from slaves (register/unregister/response)
         message_t msg;
         while (read(master_fd, &msg, sizeof(msg)) == sizeof(msg)) {
             switch (msg.type) {
@@ -283,12 +290,16 @@ int main(void) {
             }
         }
         
-        // Send queries every iteration for active IPC communication
-        send_queries();
+        // 3. Send ONE query to ALL active slaves
+        send_single_query_to_all_active_slaves();
         
-        // Small delay to prevent busy waiting
-        for (volatile int i = 0; i < 1000; i++);
+        // 4. Small delay to control query rate (this is the key!)
+        for (volatile int i = 0; i < 100000; i++);  // Increased delay
     }
+    
+#if ENABLE_PRINTING
+    printf("Master: Shutting down\n");
+#endif
     
     return 0;
 }
