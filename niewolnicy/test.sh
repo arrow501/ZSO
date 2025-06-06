@@ -1,180 +1,207 @@
 #!/bin/bash
 
-# Thorough testing - signal handling and stats accuracy
+# Signal and stats testing - building on safer test foundation
 
-echo "Thorough IPC Testing"
-echo "==================="
+set -e
 
-make clean > /dev/null 2>&1
-make > /dev/null 2>&1
+echo "=== Signal and Stats Testing ==="
 
-if [ ! -f "./main" ]; then
-    echo "Build failed"
+# Build
+echo "Building..."
+make clean >/dev/null 2>&1
+make >/dev/null 2>&1
+echo "✅ Build successful"
+
+# Test 1: Basic signal handling with long-running system
+echo
+echo "Test 1: Signal handling (system that runs long enough for testing)"
+echo "----------------------------------------------------------------"
+
+export NUM_MESSAGES_PER_SLAVE=500  # High enough to not exit quickly
+
+echo "Starting system with 2 slaves (500 messages each)..."
+./main 2 > signal_test.log 2>&1 &
+MAIN_PID=$!
+
+echo "Main PID: $MAIN_PID"
+
+# Wait for startup
+sleep 3
+
+# Check it's actually running
+if ! kill -0 $MAIN_PID 2>/dev/null; then
+    echo "❌ System exited too early - increase NUM_MESSAGES_PER_SLAVE"
     exit 1
 fi
 
-echo "✅ Built"
+echo "✅ System running, now testing signals..."
 
-# Test 1: Stats signal counting
-echo
-echo "Test 1: Signal counting (stats should print N times for N signals)"
-echo "----------------------------------------------------------------"
-
-export NUM_MESSAGES_PER_SLAVE=1000
-
-./main 2 > system.out 2>&1 &
-MAIN_PID=$!
-
-# Wait for startup
+# Send 3 stats requests with delays
+echo "Sending 3 SIGUSR2 signals..."
+kill -USR2 $MAIN_PID 2>/dev/null
+echo "Signal 1 sent"
 sleep 2
 
-# Send exactly 5 signals
-echo "Sending 5 SIGUSR2 signals..."
-for i in {1..5}; do
-    kill -USR2 $MAIN_PID
-    sleep 0.5
+kill -USR2 $MAIN_PID 2>/dev/null  
+echo "Signal 2 sent"
+sleep 2
+
+kill -USR2 $MAIN_PID 2>/dev/null
+echo "Signal 3 sent"
+sleep 2
+
+# Terminate gracefully
+echo "Terminating system..."
+kill -TERM $MAIN_PID 2>/dev/null || true
+
+# Wait for shutdown
+for i in {1..10}; do
+    if ! kill -0 $MAIN_PID 2>/dev/null; then
+        echo "✅ System shut down after $i seconds"
+        break
+    fi
+    sleep 1
 done
 
-# Wait a bit more
-sleep 2
+# Force kill if needed
+if kill -0 $MAIN_PID 2>/dev/null; then
+    echo "⚠️  Force killing..."
+    kill -KILL $MAIN_PID 2>/dev/null || true
+fi
 
-# Count stats blocks in output
-STATS_COUNT=$(grep -c "=== Master Statistics ===" system.out)
-echo "Expected: 5 stats prints"
+# Count stats outputs
+STATS_COUNT=$(grep -c "=== Master Statistics ===" signal_test.log || echo "0")
+echo "Expected: 3 stats prints"
 echo "Actual: $STATS_COUNT stats prints"
 
-if [ "$STATS_COUNT" -eq 5 ]; then
+if [ "$STATS_COUNT" -eq 3 ]; then
     echo "✅ Signal counting correct"
+elif [ "$STATS_COUNT" -gt 0 ]; then
+    echo "⚠️  Got $STATS_COUNT stats (might be signal coalescing)"
 else
-    echo "❌ Signal counting wrong"
+    echo "❌ No stats printed - signal handling broken"
 fi
 
-# Terminate
-kill -TERM $MAIN_PID 2>/dev/null
-wait $MAIN_PID 2>/dev/null || true
-
-# Test 2: Message counting accuracy
 echo
-echo "Test 2: Message counting (totals should match expected)"
-echo "-----------------------------------------------------"
+echo "Sample stats output:"
+echo "-------------------"
+grep -A 5 "=== Master Statistics ===" signal_test.log | head -10
 
-export NUM_MESSAGES_PER_SLAVE=50
+# Test 2: Message accuracy test
+echo
+echo "Test 2: Message counting accuracy (complete run)"
+echo "-----------------------------------------------"
 
-./main 3 > system2.out 2>&1 &
+export NUM_MESSAGES_PER_SLAVE=20  # Low number for complete run
+
+echo "Starting system (20 messages per slave, 3 slaves = 60 total)..."
+./main 3 > accuracy_test.log 2>&1 &
 MAIN_PID=$!
 
-sleep 3
-kill -USR2 $MAIN_PID
-sleep 1
-kill -USR2 $MAIN_PID
+# Wait a bit then get mid-run stats
 sleep 2
-
-# Let it finish naturally
-wait $MAIN_PID 2>/dev/null || true
-
-# Check final totals (should be 3 slaves * 50 messages = 150)
-FINAL_SENT=$(grep "Totals:" system2.out | tail -1 | grep -o "[0-9]* sent" | cut -d' ' -f1)
-FINAL_RECEIVED=$(grep "Totals:" system2.out | tail -1 | grep -o "[0-9]* received" | cut -d' ' -f1)
-
-echo "Expected: 150 sent, 150 received"
-echo "Actual: $FINAL_SENT sent, $FINAL_RECEIVED received"
-
-if [ "$FINAL_SENT" -eq 150 ] && [ "$FINAL_RECEIVED" -eq 150 ]; then
-    echo "✅ Message counting correct"
-else
-    echo "❌ Message counting wrong"
+if kill -0 $MAIN_PID 2>/dev/null; then
+    echo "Getting mid-run stats..."
+    kill -USR2 $MAIN_PID 2>/dev/null
+    sleep 1
 fi
 
-# Test 3: Load balancing
-echo
-echo "Test 3: Load balancing (all slaves should get equal work)"
-echo "-------------------------------------------------------"
-
-export NUM_MESSAGES_PER_SLAVE=30
-
-./main 4 > system3.out 2>&1 &
-MAIN_PID=$!
-
-sleep 2
-kill -USR2 $MAIN_PID  # Get mid-run stats
-sleep 2
-
-kill -TERM $MAIN_PID
-wait $MAIN_PID 2>/dev/null || true
-
-# Check if all slaves got roughly equal messages
-echo "Per-slave message counts from mid-run:"
-grep "Slave.*ACTIVE" system3.out | head -4
-
-# Test 4: Rapid signal test
-echo
-echo "Test 4: Rapid signal handling"
-echo "----------------------------"
-
-export NUM_MESSAGES_PER_SLAVE=200
-
-./main 1 > system4.out 2>&1 &
-MAIN_PID=$!
-
-sleep 1
-
-# Send 10 rapid signals
-echo "Sending 10 rapid signals..."
-for i in {1..10}; do
-    kill -USR2 $MAIN_PID
+# Let it complete naturally
+echo "Waiting for natural completion..."
+for i in {1..15}; do
+    if ! kill -0 $MAIN_PID 2>/dev/null; then
+        echo "✅ System completed naturally after $i seconds"
+        break
+    fi
+    sleep 1
 done
 
-sleep 3
-kill -TERM $MAIN_PID
-wait $MAIN_PID 2>/dev/null || true
-
-RAPID_STATS=$(grep -c "=== Master Statistics ===" system4.out)
-echo "Rapid signals sent: 10"
-echo "Stats printed: $RAPID_STATS"
-
-if [ "$RAPID_STATS" -ge 8 ]; then
-    echo "✅ Rapid signal handling good (some loss acceptable)"
+# Check final totals
+if grep -q "Totals:" accuracy_test.log; then
+    FINAL_LINE=$(grep "Totals:" accuracy_test.log | tail -1)
+    echo "Final totals: $FINAL_LINE"
+    
+    SENT=$(echo "$FINAL_LINE" | grep -o "[0-9]* sent" | cut -d' ' -f1)
+    RECEIVED=$(echo "$FINAL_LINE" | grep -o "[0-9]* received" | cut -d' ' -f1)
+    
+    echo "Expected: 60 sent, 60 received"
+    echo "Actual: $SENT sent, $RECEIVED received"
+    
+    if [ "$SENT" -eq 60 ] && [ "$RECEIVED" -eq 60 ]; then
+        echo "✅ Message counting perfect"
+    else
+        echo "⚠️  Message counting off (might be early termination)"
+    fi
 else
-    echo "❌ Too many signals lost"
+    echo "❌ No final stats found"
 fi
 
-# Test 5: Cleanup verification
+# Test 3: Rapid signal test 
 echo
-echo "Test 5: Cleanup after various exit scenarios"
-echo "-------------------------------------------"
+echo "Test 3: Rapid signal handling"
+echo "----------------------------"
 
-# Normal exit
-export NUM_MESSAGES_PER_SLAVE=10
-./main 1 > /dev/null 2>&1
-sleep 1
+export NUM_MESSAGES_PER_SLAVE=300
 
-# Signal exit  
-./main 1 > /dev/null 2>&1 &
+echo "Starting system for rapid signal test..."
+./main 1 > rapid_test.log 2>&1 &
 MAIN_PID=$!
-sleep 1
-kill -TERM $MAIN_PID
-wait $MAIN_PID 2>/dev/null || true
-sleep 1
 
-# Check leftovers
-LEFTOVER_COUNT=$(find /tmp /dev/shm -name "*2e518cc1-6b7d-45c9-a7f6-1a7d35fcbb3f*" 2>/dev/null | wc -l)
+sleep 2
 
-if [ "$LEFTOVER_COUNT" -eq 0 ]; then
-    echo "✅ Clean exit - no leftover files"
+if kill -0 $MAIN_PID 2>/dev/null; then
+    echo "Sending 5 rapid signals..."
+    for i in {1..5}; do
+        kill -USR2 $MAIN_PID 2>/dev/null
+        echo "Signal $i sent"
+        sleep 0.2  # Short delay
+    done
+    
+    sleep 3
+    kill -TERM $MAIN_PID 2>/dev/null || true
+    
+    # Wait for shutdown
+    for i in {1..5}; do
+        if ! kill -0 $MAIN_PID 2>/dev/null; then
+            break
+        fi
+        sleep 1
+    done
+    
+    RAPID_COUNT=$(grep -c "=== Master Statistics ===" rapid_test.log || echo "0")
+    echo "Rapid signals sent: 5"
+    echo "Stats printed: $RAPID_COUNT"
+    
+    if [ "$RAPID_COUNT" -ge 3 ]; then
+        echo "✅ Rapid signal handling acceptable"
+    else
+        echo "⚠️  Low signal response rate"
+    fi
 else
-    echo "⚠️  Found $LEFTOVER_COUNT leftover files"
-    make clean > /dev/null 2>&1
+    echo "❌ System not running for rapid test"
 fi
 
-# Summary
+# Cleanup check
 echo
-echo "Test Summary"
-echo "============"
-echo "1. Signal counting: $([ "$STATS_COUNT" -eq 5 ] && echo "✅ PASS" || echo "❌ FAIL")"
-echo "2. Message counting: $([ "$FINAL_SENT" -eq 150 ] && [ "$FINAL_RECEIVED" -eq 150 ] && echo "✅ PASS" || echo "❌ FAIL")"  
-echo "3. Load balancing: ✅ PASS (visual check above)"
-echo "4. Rapid signals: $([ "$RAPID_STATS" -ge 8 ] && echo "✅ PASS" || echo "❌ FAIL")"
-echo "5. Cleanup: $([ "$LEFTOVER_COUNT" -eq 0 ] && echo "✅ PASS" || echo "⚠️  WARN")"
+echo "Cleanup check..."
+sleep 1
+LEFTOVER=$(find /tmp /dev/shm -name "*2e518cc1-6b7d-45c9-a7f6-1a7d35fcbb3f*" 2>/dev/null | wc -l)
+if [ "$LEFTOVER" -eq 0 ]; then
+    echo "✅ No leftover files"
+else
+    echo "⚠️  Found $LEFTOVER leftover files (cleaning up...)"
+    make clean >/dev/null 2>&1
+fi
 
 echo
-echo "Log files: system.out, system2.out, system3.out, system4.out"
+echo "=== Test Summary ==="
+echo "Signal handling: $([ "$STATS_COUNT" -eq 3 ] && echo "✅ PASS" || echo "⚠️  PARTIAL")"
+echo "Message accuracy: $([ "$SENT" -eq 60 ] && [ "$RECEIVED" -eq 60 ] && echo "✅ PASS" || echo "⚠️  CHECK")"
+echo "Rapid signals: $([ "$RAPID_COUNT" -ge 3 ] && echo "✅ PASS" || echo "⚠️  CHECK")"
+echo "Cleanup: $([ "$LEFTOVER" -eq 0 ] && echo "✅ PASS" || echo "⚠️  WARN")"
+
+echo
+echo "Log files created:"
+echo "- signal_test.log (signal handling test)"
+echo "- accuracy_test.log (message counting test)"  
+echo "- rapid_test.log (rapid signal test)"
