@@ -252,10 +252,8 @@ int main(void) {
     
 #if ENABLE_PRINTING
     printf("Master: Started (PID=%d)\n", getpid());
-#endif
-    
+#endif    
     // Main loop - much simpler!
-    int loop_count = 0;
     while (!should_exit) {
         // Check for pending stats requests
         sig_atomic_t pending_requests = stats_requests;
@@ -267,8 +265,7 @@ int main(void) {
             // Atomically subtract the requests we just processed
             stats_requests -= pending_requests;
         }
-        
-        // Check for messages from slaves
+          // Check for messages from slaves
         message_t msg;
         while (read(master_fd, &msg, sizeof(msg)) == sizeof(msg)) {
             switch (msg.type) {
@@ -286,11 +283,8 @@ int main(void) {
             }
         }
         
-        // Send periodic queries (every 1000 loop iterations)
-        if (++loop_count >= 1000) {
-            send_queries();
-            loop_count = 0;
-        }
+        // Send queries every iteration for active IPC communication
+        send_queries();
         
         // Small delay to prevent busy waiting
         for (volatile int i = 0; i < 1000; i++);
