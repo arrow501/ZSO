@@ -26,20 +26,6 @@ static void handle_signal(int sig) {
     }
 }
 
-static void write_pid_file(void) {
-    FILE *f = fopen(MASTER_PID_FILE, "w");
-    if (!f) {
-        perror("fopen PID file");
-        exit(1);
-    }
-    fprintf(f, "%d\n", getpid());
-    fclose(f);
-    
-#if ENABLE_PRINTING
-    printf("Master PID %d written to %s\n", getpid(), MASTER_PID_FILE);
-#endif
-}
-
 static void setup_shared_memory(void) {
     shm_unlink(SHM_NAME);
     
@@ -239,7 +225,7 @@ int main(void) {
     // Setup IPC
     setup_shared_memory();
     
-    // Create master FIFO
+    // Create master FIFO BEFORE other setup so main can detect readiness
     unlink(MASTER_FIFO);
     if (mkfifo(MASTER_FIFO, 0666) != 0) {
         perror("mkfifo");

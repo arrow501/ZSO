@@ -11,7 +11,8 @@ cleanup() {
 
 count_stats_headers() {
     # Count the number of times "=== Master Statistics ===" appears
-    grep -c "=== Master Statistics ===" output.log 2>/dev/null || echo 0
+    local count=$(grep -c "=== Master Statistics ===" output.log 2>/dev/null || echo 0)
+    echo "$count"
 }
 
 trap cleanup EXIT
@@ -27,12 +28,20 @@ if [[ ! -x "./main" ]]; then
 fi
 
 echo "Starting system with 2 slaves..."
-# Use reasonable message count for testing
-NUM_MESSAGES_PER_SLAVE=20 ./main 2 > output.log 2>&1 &
+# Use reasonable message count for testing and shorter delay
+QUERY_DELAY_CYCLES=100000 NUM_MESSAGES_PER_SLAVE=20 ./main 2 > output.log 2>&1 &
 MAIN_PID=$!
 
 # Wait for system to start
 sleep 3
+
+# Check if processes are actually running
+if ! kill -0 $MAIN_PID 2>/dev/null; then
+    echo "❌ Main process died early"
+    echo "Last lines of output:"
+    tail -10 output.log
+    exit 1
+fi
 
 # No need to find master PID - we have main PID!
 echo "Main PID: $MAIN_PID (will forward signals to master)"
@@ -90,7 +99,7 @@ if [[ $count3 -eq $final_expected ]]; then
     echo "🎉 SUCCESS: Perfect 1:1 signal-to-display ratio!"
     result=0
 else
-    echo "❌ FAILURE: Signal loss detected"
+    echo "❌ FAILURE: Signal loss detected (got $count3, expected $final_expected)"
     result=1
 fi
 
