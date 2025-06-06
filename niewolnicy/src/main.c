@@ -67,15 +67,28 @@ static void cleanup_processes(void) {
     printf("Main: All processes terminated\n");
 }
 
-static int wait_for_master_ready(void) {
-    // Wait for master to create PID file (poll-based, no time dependency)
-    for (int i = 0; i < 1000; i++) { // Max iterations instead of time
-        if (file_exists(MASTER_PID_FILE)) {
-            return 0;
+static int wait_for_shared_memory_ready(void) {
+    // Wait for master to create initialization semaphore
+    sem_t *init_sem = NULL;
+    
+    for (int i = 0; i < 1000; i++) {
+        init_sem = sem_open(SEM_INIT_NAME, 0);
+        if (init_sem != SEM_FAILED) {
+            // Semaphore exists, now wait for master to signal initialization complete
+            if (sem_wait(init_sem) == 0) {
+                sem_close(init_sem);
+                return 0;
+            } else {
+                perror("sem_wait for initialization");
+                sem_close(init_sem);
+                return -1;
+            }
         }
         // Brief CPU pause without time dependency
         for (volatile int j = 0; j < 10000; j++);
     }
+    
+    printf("Main: Timeout waiting for master to create initialization semaphore\n");
     return -1;
 }
 
@@ -127,13 +140,13 @@ int main(int argc, char *argv[]) {
     
     printf("Main: Master started (PID=%d)\n", master_pid);
     
-    // Wait for master to be ready (PID file)
-    if (wait_for_master_ready() < 0) {
-        printf("Main: Master failed to start properly\n");
+    // Wait for master to be ready (shared memory fully initialized)
+    if (wait_for_shared_memory_ready() < 0) {
+        printf("Main: Master failed to initialize shared memory\n");
         return 1;
     }
     
-    // Setup stats monitoring - this will block until master initializes shared memory
+    // Setup stats monitoring - shared memory is now guaranteed to be ready
     if (setup_stats_monitoring(master_pid, &stats, &stats_sem) < 0) {
         printf("Main: Failed to setup stats monitoring\n");
         return 1;

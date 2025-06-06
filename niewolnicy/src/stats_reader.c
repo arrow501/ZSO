@@ -50,22 +50,9 @@ static void wait_and_display_stats(stats_t *stats, sem_t *sem) {
 }
 
 int setup_stats_monitoring(pid_t master_pid, stats_t **stats_ptr, sem_t **sem_ptr) {
-    // First, wait for master to signal that shared memory is fully initialized
-    sem_t *init_sem = sem_open(SEM_INIT_NAME, 0);
-    if (init_sem == SEM_FAILED) {
-        perror("sem_open init semaphore");
-        return -1;
-    }
+    // Shared memory should already be initialized by this point
+    // (main already waited on the initialization semaphore)
     
-    // Block until master signals initialization is complete
-    if (sem_wait(init_sem) != 0) {
-        perror("sem_wait for initialization");
-        sem_close(init_sem);
-        return -1;
-    }
-    sem_close(init_sem);
-    
-    // Now shared memory is guaranteed to be fully initialized
     int shm_fd = shm_open(SHM_NAME, O_RDWR, 0666);
     if (shm_fd < 0) {
         perror("shm_open");

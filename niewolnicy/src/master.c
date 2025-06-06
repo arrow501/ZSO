@@ -19,13 +19,13 @@ static stats_t *stats = NULL;
 static sem_t *stats_sem = NULL;
 static sem_t *stats_init_sem = NULL;
 static volatile sig_atomic_t should_exit = 0;
-static volatile sig_atomic_t stats_requested = 0;
+static volatile sig_atomic_t stats_signals_pending = 0;
 
 static void handle_signal(int sig) {
     if (sig == SIGINT || sig == SIGTERM) {
         should_exit = 1;
     } else if (sig == SIGUSR1) {
-        stats_requested = 1;
+        stats_signals_pending++;  // Count each signal atomically
     }
 }
 
@@ -273,9 +273,9 @@ int main(void) {
     struct pollfd pfd = { .fd = master_fd, .events = POLLIN };
     
     while (!should_exit) {
-        // Handle stats request
-        if (stats_requested) {
-            stats_requested = 0;
+        // Handle all pending stats requests
+        while (stats_signals_pending > 0) {
+            stats_signals_pending--;  // Process one signal
             signal_stats_ready();
         }
         
