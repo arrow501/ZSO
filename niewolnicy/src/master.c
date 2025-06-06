@@ -17,6 +17,7 @@ static int master_fd = -1;
 static int slave_fds[NUM_SLAVES];
 static stats_t *stats = NULL;
 static sem_t *stats_sem = NULL;
+static sem_t *stats_init_sem = NULL;
 static volatile sig_atomic_t should_exit = 0;
 static volatile sig_atomic_t stats_requested = 0;
 
@@ -59,20 +60,31 @@ static int setup_shared_memory(void) {
     DEBUG_ASSERT(pthread_mutex_init(&stats->mutex, &attr) == 0, "Should init mutex");
     pthread_mutexattr_destroy(&attr);
     
-    // Initialize stats
+    // Initialize stats with mutex protection
+    pthread_mutex_lock(&stats->mutex);
     stats->master_pid = getpid();
     memset(stats->messages_sent, 0, sizeof(stats->messages_sent));
     memset(stats->messages_received, 0, sizeof(stats->messages_received));
     memset(stats->active_slaves, 0, sizeof(stats->active_slaves));
     stats->magic = STATS_MAGIC;
+    pthread_mutex_unlock(&stats->mutex);
     
     return 0;
 }
 
 static int setup_semaphore(void) {
+    // Clean up old semaphores
     sem_unlink(SEM_NAME);
+    sem_unlink(SEM_INIT_NAME);
+    
+    // Create stats ready semaphore
     stats_sem = sem_open(SEM_NAME, O_CREAT | O_EXCL, 0666, 0);
-    DEBUG_ASSERT(stats_sem != SEM_FAILED, "Should create semaphore");
+    DEBUG_ASSERT(stats_sem != SEM_FAILED, "Should create stats semaphore");
+    
+    // Create initialization semaphore (starts at 0 - blocks until we signal)
+    stats_init_sem = sem_open(SEM_INIT_NAME, O_CREAT | O_EXCL, 0666, 0);
+    DEBUG_ASSERT(stats_init_sem != SEM_FAILED, "Should create init semaphore");
+    
     return 0;
 }
 
@@ -213,6 +225,11 @@ static void cleanup(void) {
         sem_close(stats_sem);
     }
     sem_unlink(SEM_NAME);
+    
+    if (stats_init_sem != NULL) {
+        sem_close(stats_init_sem);
+    }
+    sem_unlink(SEM_INIT_NAME);
 }
 
 int main(void) {
@@ -235,6 +252,9 @@ int main(void) {
     // Setup IPC
     DEBUG_ASSERT(setup_shared_memory() == 0, "Should setup shared memory");
     DEBUG_ASSERT(setup_semaphore() == 0, "Should setup semaphore");
+    
+    // Signal that shared memory is fully initialized and ready
+    DEBUG_ASSERT(sem_post(stats_init_sem) == 0, "Should signal initialization complete");
     
     // Create master FIFO
     unlink(MASTER_FIFO);

@@ -55,7 +55,7 @@ large: debug
 clean:
 	rm -f master slave main
 	rm -f /tmp/master_fifo_* /tmp/slave_fifo_* /tmp/master_pid_*
-	rm -f /dev/shm/master_stats_* /dev/shm/sem.stats_ready_*
+	rm -f /dev/shm/master_stats_* /dev/shm/sem.stats_ready_* /dev/shm/sem.stats_init_*
 
 # Main launcher (no separate stats_reader needed)
 main: $(SRCDIR)/main.c $(SRCDIR)/stats_reader.c include/common.h include/parameters.h

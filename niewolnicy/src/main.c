@@ -31,7 +31,8 @@ static void handle_signal(int sig) {
             trigger_and_display_stats(master_pid, stats, stats_sem);
         }
     }
-    (void)sig; // Avoid unused parameter warning by using sig
+    // Avoid unused parameter warning by using sig
+    (void)sig;
 }
 
 static void cleanup_processes(void) {
@@ -126,13 +127,13 @@ int main(int argc, char *argv[]) {
     
     printf("Main: Master started (PID=%d)\n", master_pid);
     
-    // Wait for master to be ready
+    // Wait for master to be ready (PID file)
     if (wait_for_master_ready() < 0) {
         printf("Main: Master failed to start properly\n");
         return 1;
     }
     
-    // Setup stats monitoring
+    // Setup stats monitoring - this will block until master initializes shared memory
     if (setup_stats_monitoring(master_pid, &stats, &stats_sem) < 0) {
         printf("Main: Failed to setup stats monitoring\n");
         return 1;
