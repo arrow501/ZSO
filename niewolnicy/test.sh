@@ -10,9 +10,11 @@ cleanup() {
 }
 
 count_stats_headers() {
-    # Count the number of times "=== Master Statistics ===" appears
-    local count=$(grep -c "=== Master Statistics ===" output.log 2>/dev/null || echo 0)
-    echo "$count"
+    if [[ -f "output.log" ]]; then
+        grep -c "=== Master Statistics ===" output.log 2>/dev/null || echo "0"
+    else
+        echo "0"
+    fi
 }
 
 trap cleanup EXIT
@@ -28,24 +30,35 @@ if [[ ! -x "./main" ]]; then
 fi
 
 echo "Starting system with 2 slaves..."
-# Use reasonable message count for testing and shorter delay
-QUERY_DELAY_CYCLES=100000 NUM_MESSAGES_PER_SLAVE=20 ./main 2 > output.log 2>&1 &
+# Use LONG message count so system stays alive during testing
+QUERY_DELAY_CYCLES=5000000 NUM_MESSAGES_PER_SLAVE=1000 ./main 2 > output.log 2>&1 &
 MAIN_PID=$!
 
-# Wait for system to start
-sleep 3
+# Wait longer for system to start
+echo "Waiting for system startup..."
+sleep 8
 
 # Check if processes are actually running
 if ! kill -0 $MAIN_PID 2>/dev/null; then
     echo "❌ Main process died early"
     echo "Last lines of output:"
     tail -10 output.log
+    echo ""
+    echo "Checking for FIFO existence:"
+    ls -la /tmp/master_fifo_2e518cc1-6b7d-45c9-a7f6-1a7d35fcbb3f 2>/dev/null || echo "Master FIFO not found"
     exit 1
 fi
 
-# No need to find master PID - we have main PID!
-echo "Main PID: $MAIN_PID (will forward signals to master)"
-echo ""
+# Double-check that the system is actually running
+echo "Checking system status..."
+if [[ ! -p "/tmp/master_fifo_2e518cc1-6b7d-45c9-a7f6-1a7d35fcbb3f" ]]; then
+    echo "❌ Master FIFO not found - system may not have started properly"
+    echo "Last lines of output:"
+    tail -10 output.log
+    exit 1
+fi
+
+echo "Main PID: $MAIN_PID"
 
 # Test 1: Send 5 signals with delays (should definitely work)
 echo "Test 1: Sending 5 signals with 1 second delays..."
