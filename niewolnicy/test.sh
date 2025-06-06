@@ -11,9 +11,9 @@ make clean >/dev/null 2>&1
 make >/dev/null 2>&1
 echo "✅ Built"
 
-# Test 1: 10 signals with 0.1s delay
+# Test 1: 10 signals with 0.01s delay
 echo
-echo "Test 1: 10 signals with 0.1s delay"
+echo "Test 1: 10 signals with 0.01s delay"
 echo "----------------------------------"
 
 ./main 2 > test1.log 2>&1 &
@@ -21,10 +21,10 @@ PID=$!
 
 sleep 0.1  # Let it start
 
-echo "Sending 10 signals with 0.1s delay..."
+echo "Sending 10 signals with 0.01s delay..."
 for i in {1..10}; do
     kill -USR2 $PID
-    sleep 0.1
+    sleep 0.01
 done
 
 sleep 1
