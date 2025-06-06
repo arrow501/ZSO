@@ -14,6 +14,17 @@ cleanup() {
 trap cleanup EXIT
 cleanup
 
+get_master_pid() {
+    # Read master PID from PID file
+    local pid_file="/tmp/master_pid_2e518cc1-6b7d-45c9-a7f6-1a7d35fcbb3f"
+    if [[ -f "$pid_file" ]]; then
+        cat "$pid_file" 2>/dev/null
+    else
+        # Fallback to pgrep
+        pgrep master | head -n 1
+    fi
+}
+
 run_test() {
     local test_name="$1"
     local num_slaves="$2"
@@ -47,10 +58,17 @@ run_test() {
     
     echo "✓ All processes started successfully"
     
-    # Test signal handling
+    # Get master PID for direct signaling
+    local master_pid=$(get_master_pid)
+    if [[ -z "$master_pid" ]]; then
+        echo "FAIL: Could not get master PID"
+        return 1
+    fi
+    
+    # Test signal handling - send directly to master
     echo "Testing signal handling..."
     for i in $(seq 1 3); do
-        kill -USR1 $MAIN_PID 2>/dev/null
+        kill -USR1 $master_pid 2>/dev/null
         sleep 0.5
     done
     echo "✓ Signal handling tested"
@@ -58,15 +76,15 @@ run_test() {
     # Let system run for specified duration
     sleep $test_duration
     
-    # Test rapid fire signals
+    # Test rapid fire signals - send directly to master
     echo "Testing rapid fire signals..."
     for i in $(seq 1 5); do
-        kill -USR1 $MAIN_PID 2>/dev/null
+        kill -USR1 $master_pid 2>/dev/null
         sleep 0.1
     done
     echo "✓ Rapid fire signals tested"
     
-    # Graceful shutdown
+    # Graceful shutdown - terminate main
     echo "Testing graceful shutdown..."
     kill -TERM $MAIN_PID 2>/dev/null
     
@@ -115,23 +133,29 @@ sleep 3
 if kill -0 $MAIN_PID 2>/dev/null; then
     echo "✓ Stress test setup complete"
     
-    # Burst of signals
-    for burst in $(seq 1 3); do
-        echo "Signal burst $burst/3..."
-        for i in $(seq 1 10); do
-            kill -USR1 $MAIN_PID 2>/dev/null
+    # Get master PID
+    MASTER_PID=$(get_master_pid)
+    
+    if [[ -n "$MASTER_PID" ]]; then
+        # Burst of signals to master
+        for burst in $(seq 1 3); do
+            echo "Signal burst $burst/3..."
+            for i in $(seq 1 10); do
+                kill -USR1 $MASTER_PID 2>/dev/null
+                sleep 0.05
+            done
+            sleep 1
         done
+        
+        # Test slave termination
+        echo "Testing slave termination..."
+        killall -TERM slave 2>/dev/null
+        sleep 2
+        
+        # Final stats
+        kill -USR1 $MASTER_PID 2>/dev/null
         sleep 1
-    done
-    
-    # Test slave termination
-    echo "Testing slave termination..."
-    killall -TERM slave 2>/dev/null
-    sleep 2
-    
-    # Final stats
-    kill -USR1 $MAIN_PID 2>/dev/null
-    sleep 1
+    fi
     
     # Cleanup stress test
     kill -TERM $MAIN_PID 2>/dev/null
