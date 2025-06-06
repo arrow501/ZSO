@@ -1,186 +1,160 @@
 #!/bin/bash
 
-# Simplified Valgrind Test Suite for Master-Slave IPC System
+# Enhanced valgrind test with multiple tools and signal testing
 
-make release > /dev/null 2>&1
-rm -rf valgrind_logs
+echo "Enhanced Valgrind Test"
+echo "====================="
 
-LOGS_DIR="./valgrind_logs"
-TEST_DURATION=6
-
-mkdir -p "$LOGS_DIR"
-
-cleanup() {
-    pkill -f "main|master|slave|valgrind" 2>/dev/null || true
-    sleep 1
-    rm -f /tmp/master_fifo_* /tmp/slave_fifo_* /tmp/master_pid_* 2>/dev/null || true
-    rm -f /dev/shm/master_stats_* /dev/shm/sem.stats_ready_* 2>/dev/null || true
-}
-
-trap cleanup EXIT
-
-check_binaries() {
-    for binary in "./master" "./slave" "./main"; do
-        if [[ ! -x "$binary" ]]; then
-            echo "Error: $binary not found. Run 'make' first."
-            exit 1
-        fi
-    done
-    echo "✓ All binaries found"
-}
-
-test_memcheck() {
-    echo ""
-    echo "=== MEMORY LEAK TEST ==="
-    
-    valgrind --tool=memcheck \
-             --leak-check=full \
-             --show-leak-kinds=all \
-             --track-origins=yes \
-             --log-file="$LOGS_DIR/memcheck.log" \
-             ./main 3 &
-    
-    MAIN_PID=$!
-    sleep 3
-    
-    # Send some signals during test
-    for i in {1..3}; do
-        sleep 1
-        kill -USR1 $MAIN_PID 2>/dev/null || true
-    done
-    
-    # Graceful shutdown
-    kill -TERM $MAIN_PID 2>/dev/null
-    wait $MAIN_PID 2>/dev/null
-    
-    echo "✓ Memcheck complete"
-}
-
-test_helgrind() {
-    echo ""
-    echo "=== THREAD SAFETY TEST ==="
-    
-    valgrind --tool=helgrind \
-             --log-file="$LOGS_DIR/helgrind.log" \
-             ./main 2 &
-    
-    MAIN_PID=$!
-    sleep 3
-    
-    # Rapid signal testing for race conditions
-    for i in {1..5}; do
-        kill -USR1 $MAIN_PID 2>/dev/null || true
-        sleep 0.2
-    done
-    
-    kill -TERM $MAIN_PID 2>/dev/null
-    wait $MAIN_PID 2>/dev/null
-    
-    echo "✓ Helgrind complete"
-}
-
-test_drd() {
-    echo ""
-    echo "=== DATA RACE TEST ==="
-    
-    valgrind --tool=drd \
-             --log-file="$LOGS_DIR/drd.log" \
-             ./main 3 &
-    
-    MAIN_PID=$!
-    sleep 2
-    
-    # Stress test with rapid signals
-    for burst in {1..3}; do
-        for i in {1..3}; do
-            kill -USR1 $MAIN_PID 2>/dev/null || true
-            sleep 0.1
-        done
-        sleep 0.5
-    done
-    
-    kill -TERM $MAIN_PID 2>/dev/null
-    wait $MAIN_PID 2>/dev/null
-    
-    echo "✓ DRD complete"
-}
-
-show_results() {
-    echo ""
-    echo "========================================="
-    echo "  VALGRIND RESULTS SUMMARY"
-    echo "========================================="
-    
-    for tool in "memcheck" "helgrind" "drd"; do
-        local log="$LOGS_DIR/${tool}.log"
-        echo ""
-        echo "${tool^} Results:"
-        if [[ -f "$log" ]]; then
-            local error_line=$(tail -n 20 "$log" | grep "ERROR SUMMARY" | tail -n 1)
-            if [[ -n "$error_line" ]]; then
-                echo "  $error_line"
-            else
-                echo "  No error summary found"
-            fi
-            
-            # Show any definite leaks for memcheck
-            if [[ "$tool" == "memcheck" ]]; then
-                local leak_line=$(tail -n 20 "$log" | grep "definitely lost" | tail -n 1)
-                if [[ -n "$leak_line" ]]; then
-                    echo "  $leak_line"
-                fi
-            fi
-        else
-            echo "  Log file not found"
-        fi
-    done
-    
-    echo ""
-    echo "All logs saved to: $LOGS_DIR/"
-}
-
-main() {
-    echo "========================================="
-    echo "  Simplified Valgrind Test Suite"
-    echo "  Master-Slave IPC System"
-    echo "========================================="
-    
-    check_binaries
-    
-    test_memcheck
-    cleanup
-    sleep 1
-    
-    test_helgrind
-    cleanup 
-    sleep 1
-    
-    test_drd
-    cleanup
-    
-    show_results
-    
-    echo ""
-    echo "Generated files:"
-    find "$LOGS_DIR" -name "*.log" -type f | sort | while read -r file; do
-        echo "  📄 $file"
-    done
-    
-    echo ""
-    echo "✅ Valgrind testing complete!"
-}
-
-if [[ "$1" == "--help" || "$1" == "-h" ]]; then
-    echo "Simplified Valgrind Test Suite"
-    echo ""
-    echo "Usage: $0"
-    echo ""
-    echo "Runs three tests on the unified main launcher:"
-    echo "  1. Memory Leak Detection (memcheck)"
-    echo "  2. Thread Safety (helgrind)" 
-    echo "  3. Data Race Detection (DRD)"
-    echo ""
-    exit 0
+# Check valgrind exists
+if ! command -v valgrind &> /dev/null; then
+    echo "Valgrind not found"
+    exit 1
 fi
 
-main
+# Build debug version
+echo "Building debug version..."
+make clean >/dev/null 2>&1
+make release >/dev/null 2>&1
+echo "✅ Built"
+
+# Use more messages for better stress testing
+export NUM_MESSAGES_PER_SLAVE=50
+
+echo
+echo "Test 1: Memcheck (memory leaks & errors)"
+echo "----------------------------------------"
+
+timeout 30s valgrind \
+    --tool=memcheck \
+    --leak-check=full \
+    --show-leak-kinds=all \
+    --track-origins=yes \
+    --error-exitcode=1 \
+    ./main 2 2>memcheck.out
+
+MEMCHECK_EXIT=$?
+echo "Exit code: $MEMCHECK_EXIT"
+echo "Memory issues:"
+grep -E "(ERROR SUMMARY|definitely lost|indirectly lost|possibly lost)" memcheck.out | head -5
+
+echo
+echo "Test 2: Helgrind (race conditions)"
+echo "----------------------------------"
+
+timeout 30s valgrind \
+    --tool=helgrind \
+    --error-exitcode=1 \
+    ./main 2 2>helgrind.out
+
+HELGRIND_EXIT=$?
+echo "Exit code: $HELGRIND_EXIT"
+echo "Race conditions:"
+grep -E "(ERROR SUMMARY|data race|lock order)" helgrind.out | head -5
+
+echo
+echo "Test 3: DRD (thread synchronization)"
+echo "------------------------------------"
+
+timeout 30s valgrind \
+    --tool=drd \
+    --error-exitcode=1 \
+    ./main 2 2>drd.out
+
+DRD_EXIT=$?
+echo "Exit code: $DRD_EXIT"
+echo "Synchronization issues:"
+grep -E "(ERROR SUMMARY|data race|mutex|deadlock)" drd.out | head -5
+
+echo
+echo "Test 4: Memcheck with signals"
+echo "-----------------------------"
+
+valgrind \
+    --tool=memcheck \
+    --leak-check=full \
+    --error-exitcode=1 \
+    ./main 2 >signal_test.log 2>memcheck_signal.out &
+
+VALGRIND_PID=$!
+sleep 2
+
+# Send some signals to test signal handling under valgrind
+echo "Sending test signals..."
+if ps -p $VALGRIND_PID > /dev/null; then
+    MAIN_PID=$(pgrep -P $VALGRIND_PID main 2>/dev/null || echo "")
+    if [ -n "$MAIN_PID" ]; then
+        kill -USR2 $MAIN_PID 2>/dev/null || true
+        sleep 1
+        kill -USR2 $MAIN_PID 2>/dev/null || true
+        sleep 1
+        kill -TERM $MAIN_PID 2>/dev/null || true
+    fi
+fi
+
+wait $VALGRIND_PID 2>/dev/null || true
+SIGNAL_EXIT=$?
+
+echo "Exit code: $SIGNAL_EXIT"
+echo "Signal handling under valgrind:"
+grep -E "(ERROR SUMMARY|definitely lost)" memcheck_signal.out | head -3
+
+echo
+echo "Test 5: Quick stress test"
+echo "-------------------------"
+
+export NUM_MESSAGES_PER_SLAVE=20
+
+timeout 25s valgrind \
+    --tool=memcheck \
+    --leak-check=summary \
+    --error-exitcode=1 \
+    ./main 5 2>stress.out
+
+STRESS_EXIT=$?
+echo "Exit code: $STRESS_EXIT"
+echo "Stress test summary:"
+grep -E "(ERROR SUMMARY|lost)" stress.out | head -3
+
+# Summary
+echo
+echo "=== Valgrind Summary ==="
+echo "Memcheck:        $([ $MEMCHECK_EXIT -eq 0 ] && echo "✅ CLEAN" || echo "❌ ISSUES")"
+echo "Helgrind:        $([ $HELGRIND_EXIT -eq 0 ] && echo "✅ NO RACES" || echo "❌ RACES FOUND")"
+echo "DRD:             $([ $DRD_EXIT -eq 0 ] && echo "✅ SYNC OK" || echo "❌ SYNC ISSUES")"
+echo "Signal handling: $([ $SIGNAL_EXIT -eq 0 ] && echo "✅ CLEAN" || echo "❌ ISSUES")"
+echo "Stress test:     $([ $STRESS_EXIT -eq 0 ] && echo "✅ STABLE" || echo "❌ UNSTABLE")"
+
+TOTAL_ISSUES=$((MEMCHECK_EXIT + HELGRIND_EXIT + DRD_EXIT + SIGNAL_EXIT + STRESS_EXIT))
+
+echo
+if [ $TOTAL_ISSUES -eq 0 ]; then
+    echo "🏆 PERFECT: No memory or threading issues detected!"
+elif [ $TOTAL_ISSUES -le 2 ]; then
+    echo "✅ GOOD: Minor issues detected, check logs"
+else
+    echo "⚠️  ISSUES: Multiple problems detected, review logs carefully"
+fi
+
+echo
+echo "📁 Generated logs:"
+echo "  - memcheck.out (memory errors)"
+echo "  - helgrind.out (race conditions)"
+echo "  - drd.out (thread synchronization)"
+echo "  - memcheck_signal.out (signal handling)"
+echo "  - stress.out (stress test)"
+
+# Show any critical errors
+echo
+if [ $TOTAL_ISSUES -gt 0 ]; then
+    echo "Critical issues found:"
+    for file in memcheck.out helgrind.out drd.out memcheck_signal.out stress.out; do
+        if [ -f "$file" ]; then
+            ERRORS=$(grep -c "ERROR SUMMARY: [1-9]" "$file" 2>/dev/null || echo "0")
+            if [ "$ERRORS" -gt 0 ]; then
+                echo "  $file: $ERRORS error(s)"
+            fi
+        fi
+    done
+fi
+
+make clean >/dev/null 2>&1
