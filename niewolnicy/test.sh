@@ -1,27 +1,25 @@
 #!/bin/bash
 
-# Simple signal test - don't mess with NUM_MESSAGES_PER_SLAVE
-# Just test signal handling with default parameters
+# Signal handling test - clean and simple
 
 set -e
 
-echo "=== Simple Signal Test ==="
+echo "Signal Test"
+echo "==========="
 
 make clean >/dev/null 2>&1
 make >/dev/null 2>&1
-echo "✅ Built"
+echo "Built successfully"
 
-# Test 1: 10 signals with 0.001s delay
+# Test 1: Spaced signals
 echo
-echo "Test 1: 10 signals with 0.001s delay"
-echo "----------------------------------"
+echo "Test 1: Spaced signals (0.001s delay)"
+echo "--------------------------------------"
 
 ./main 2 > test1.log 2>&1 &
 PID=$!
+sleep 0.1
 
-sleep 0.1  # Let it start
-
-echo "Sending 10 signals with 0.001s delay..."
 for i in {1..10}; do
     kill -USR2 $PID
     sleep 0.001
@@ -32,108 +30,97 @@ kill -TERM $PID 2>/dev/null || true
 wait $PID 2>/dev/null || true
 
 STATS1=$(grep -c "=== Master Statistics ===" test1.log || echo "0")
-echo "Result: $STATS1/10 stats printed"
+echo "Result: $STATS1/10"
 
-# Test 2: 10 rapid signals (no delay)
+# Test 2: Burst signals
 echo
-echo "Test 2: 10 rapid signals (no delay)"
-echo "----------------------------------"
+echo "Test 2: Burst signals (no delay)"
+echo "--------------------------------"
 
 ./main 2 > test2.log 2>&1 &
 PID=$!
+sleep 0.1
 
-sleep 0.1  # Let it start
-
-echo "Sending 10 rapid signals..."
-kill -USR2 $PID #1
-kill -USR2 $PID #2
-kill -USR2 $PID #3
-kill -USR2 $PID #4
-kill -USR2 $PID #5
-kill -USR2 $PID #6
-kill -USR2 $PID #7
-kill -USR2 $PID #8
-kill -USR2 $PID #9
-kill -USR2 $PID #10
-
+kill -USR2 $PID
+kill -USR2 $PID
+kill -USR2 $PID
+kill -USR2 $PID
+kill -USR2 $PID
+kill -USR2 $PID
+kill -USR2 $PID
+kill -USR2 $PID
+kill -USR2 $PID
+kill -USR2 $PID
 
 sleep 1
 kill -TERM $PID 2>/dev/null || true
 wait $PID 2>/dev/null || true
 
 STATS2=$(grep -c "=== Master Statistics ===" test2.log || echo "0")
-echo "Result: $STATS2/10 stats printed"
+echo "Result: $STATS2/10"
 
-# Test 3: Natural completion with final stats capture
+# Test 3: Natural completion
 echo
-echo "Test 3: Natural completion with stats"
-echo "------------------------------------"
+echo "Test 3: Natural completion"
+echo "--------------------------"
 
-echo "Running system and capturing final stats..."
 ./main 1 > test3.log 2>&1 &
 PID=$!
-
-# Wait a moment, then request stats before completion
 sleep 0.8
 
 if kill -0 $PID 2>/dev/null; then
-    echo "Requesting final stats before completion..."
     kill -USR2 $PID
     sleep 0.3
 fi
 
-# Let it finish naturally
 wait $PID 2>/dev/null || true
 
 NATURAL_STATS=$(grep -c "=== Master Statistics ===" test3.log || echo "0")
-FINAL_STATS=$(grep "Totals:" test3.log | tail -1 || echo "No totals found")
-echo "Stats captured: $NATURAL_STATS"
-echo "Final stats: $FINAL_STATS"
+FINAL_STATS=$(grep "Totals:" test3.log | tail -1 || echo "None")
+echo "Stats: $NATURAL_STATS"
+echo "Final: $FINAL_STATS"
 
-# Test 4: Interactive-style test
+# Test 4: Interactive test
 echo
-echo "Test 4: Interactive simulation"
-echo "-----------------------------"
+echo "Test 4: Interactive test"
+echo "------------------------"
 
 ./main 1 > test4.log 2>&1 &
 PID=$!
 
 sleep 0.5
-echo "Requesting stats at different times..."
-
 if kill -0 $PID 2>/dev/null; then
     kill -USR2 $PID
-    echo "  Stats request 1 sent"
 fi
 
 sleep 0.5
-
 if kill -0 $PID 2>/dev/null; then
     kill -USR2 $PID
-    echo "  Stats request 2 sent"
 fi
 
-# Let it finish naturally
 wait $PID 2>/dev/null || true
 
 INTERACTIVE_STATS=$(grep -c "=== Master Statistics ===" test4.log || echo "0")
-echo "Interactive stats: $INTERACTIVE_STATS"
+echo "Stats: $INTERACTIVE_STATS"
 
-# Summary
+# Results
 echo
-echo "=== Results ==="
-echo "0.001s delay:     $STATS1/10 ($([ "$STATS1" -eq 10 ] && echo "✅ PERFECT" || echo "⚠️  $STATS1 received"))"
-echo "No delay:       $STATS2/10 ($([ "$STATS2" -ge 5 ] && echo "✅ GOOD" || echo "⚠️  Only $STATS2"))"
-echo "Natural stats:  $NATURAL_STATS ($([ "$NATURAL_STATS" -ge 1 ] && echo "✅ CAPTURED" || echo "❌ MISSED"))"
-echo "Interactive:    $INTERACTIVE_STATS ($([ "$INTERACTIVE_STATS" -ge 1 ] && echo "✅ WORKING" || echo "❌ BROKEN"))"
+echo "Summary"
+echo "-------"
+echo "Spaced:      $STATS1/10"
+echo "Burst:       $STATS2/10"
+echo "Natural:     $NATURAL_STATS"
+echo "Interactive: $INTERACTIVE_STATS"
 
-echo
-echo "📁 Log files: test1.log, test2.log, test3.log, test4.log"
-
-# Quick cleanup check
+# Cleanup
 LEFTOVER=$(find /tmp /dev/shm -name "*2e518cc1-6b7d-45c9-a7f6-1a7d35fcbb3f*" 2>/dev/null | wc -l)
-echo "Leftover files: $LEFTOVER"
-
 if [ "$LEFTOVER" -gt 0 ]; then
     make clean >/dev/null 2>&1
+fi
+
+echo
+if [ "$STATS1" -eq 10 ] && [ "$STATS2" -ge 5 ] && [ "$NATURAL_STATS" -ge 1 ] && [ "$INTERACTIVE_STATS" -ge 1 ]; then
+    echo "All tests passed"
+else
+    echo "Some issues detected - check logs"
 fi
