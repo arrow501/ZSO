@@ -176,9 +176,4 @@ grep "ERROR SUMMARY:" drd_burst.out 2>/dev/null || echo "No output"
 RACE_COUNT=$(grep -c "Possible data race" helgrind_spam.out 2>/dev/null || echo "0")
 DRD_RACES=$(grep -c "data race" drd_burst.out 2>/dev/null || echo "0")
 
-if [ $RACE_COUNT -gt 0 ] || [ $DRD_RACES -gt 0 ]; then
-    echo
-    echo "Race conditions: $RACE_COUNT (helgrind) + $DRD_RACES (drd)"
-fi
-
 make clean >/dev/null 2>&1
