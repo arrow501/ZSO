@@ -240,13 +240,10 @@ int main(void) {
     
     // SIMPLE main loop 
     while (!should_exit) {
-        // 1. Check for pending stats requests 
-        sig_atomic_t pending_requests = stats_requests;
-        if (pending_requests > 0) {
-            for (sig_atomic_t i = 0; i < pending_requests; i++) {
-                display_stats();
-            }
-            stats_requests--;
+        // 1. Check for pending stats requests (RACE-FREE VERSION)
+        while (stats_requests > 0) {
+            display_stats();
+            stats_requests--;  // Atomic decrement
         }
         
         // 2. Check for messages from slaves (register/unregister/response)
