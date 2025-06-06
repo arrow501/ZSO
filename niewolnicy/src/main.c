@@ -7,6 +7,7 @@
 #include <errno.h>
 #include <sys/mman.h>
 #include <semaphore.h>
+#include <poll.h>
 #include <pthread.h>
 #include "../include/common.h"
 
