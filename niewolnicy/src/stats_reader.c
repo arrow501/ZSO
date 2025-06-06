@@ -9,12 +9,6 @@
 #include <pthread.h>
 #include "../include/common.h"
 
-static volatile sig_atomic_t should_exit = 0;
-
-static void handle_signal(int sig) {
-    should_exit = 1;
-}
-
 static void display_stats(const stats_t *stats) {
     DEBUG_ASSERT(stats != NULL, "Stats should not be NULL");
     DEBUG_ASSERT(stats->magic == STATS_MAGIC, "Stats should be valid");

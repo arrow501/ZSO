@@ -31,6 +31,7 @@ static void handle_signal(int sig) {
             trigger_and_display_stats(master_pid, stats, stats_sem);
         }
     }
+    (void)sig; // Avoid unused parameter warning by using sig
 }
 
 static void cleanup_processes(void) {

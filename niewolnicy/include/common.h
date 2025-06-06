@@ -51,15 +51,19 @@ typedef struct {
     int messages_sent[NUM_SLAVES];
     int messages_received[NUM_SLAVES];
     int active_slaves[NUM_SLAVES];
-    int magic;
+    unsigned int magic;
 } stats_t;
 
-#define STATS_MAGIC 0xDEADBEEF
+#define STATS_MAGIC ((unsigned int)0xDEADBEEF)
 
 // Helper function
 static inline int file_exists(const char *path) {
     struct stat st;
     return stat(path, &st) == 0;
 }
+
+// Function prototypes for stats_reader functions
+int setup_stats_monitoring(pid_t master_pid, stats_t **stats_ptr, sem_t **sem_ptr);
+int trigger_and_display_stats(pid_t master_pid, stats_t *stats, sem_t *sem);
 
 #endif /* COMMON_H */
