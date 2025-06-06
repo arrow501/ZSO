@@ -192,11 +192,14 @@ static void signal_stats_ready(void) {
             printf("  Slave %d: ACTIVE, sent=%d, received=%d\n", 
                    i, stats->messages_sent[i], stats->messages_received[i]);
             active_count++;
-        } else {
-            printf("  Slave %d: INACTIVE\n", i);
         }
+        // Only count totals, don't print inactive ones
         total_sent += stats->messages_sent[i];
         total_received += stats->messages_received[i];
+    }
+    
+    if (active_count == 0) {
+        printf("  No active slaves\n");
     }
     
     printf("\nTotals: %d active slaves, %d sent, %d received\n", 
