@@ -13,8 +13,8 @@ else
 endif
 
 # Override parameters if provided
-ifdef NUM_SLAVES
-    CFLAGS += -DNUM_SLAVES=$(NUM_SLAVES)
+ifdef MAX_SLAVES
+    CFLAGS += -DMAX_SLAVES=$(MAX_SLAVES)
 endif
 ifdef NUM_MESSAGES_PER_SLAVE
     CFLAGS += -DNUM_MESSAGES_PER_SLAVE=$(NUM_MESSAGES_PER_SLAVE)
@@ -39,10 +39,10 @@ debug: clean all
 release: DEBUG=0
 release: clean all
 
-small: NUM_SLAVES=2 NUM_MESSAGES_PER_SLAVE=5
+small: MAX_SLAVES=2 NUM_MESSAGES_PER_SLAVE=5
 small: debug
 
-large: NUM_SLAVES=10 NUM_MESSAGES_PER_SLAVE=20
+large: MAX_SLAVES=20 NUM_MESSAGES_PER_SLAVE=20
 large: debug
 
 # Testing

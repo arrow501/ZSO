@@ -7,9 +7,9 @@
  * Global configuration parameters for the IPC system.
  */
 
-/** Number of slave processes */
-#ifndef NUM_SLAVES
-#define NUM_SLAVES 10
+/** Maximum number of slave processes */
+#ifndef MAX_SLAVES
+#define MAX_SLAVES 10
 #endif
 
 /** Number of messages each slave should process before exiting */

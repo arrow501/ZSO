@@ -102,7 +102,7 @@ int main(int argc, char *argv[]) {
     }
     
     slave_id = atoi(argv[1]);
-    DEBUG_ASSERT(slave_id >= 0 && slave_id < NUM_SLAVES, "Valid slave ID");
+    DEBUG_ASSERT(slave_id >= 0 && slave_id < MAX_SLAVES, "Valid slave ID");
     
     // Setup signal handling
     signal(SIGTERM, handle_signal);

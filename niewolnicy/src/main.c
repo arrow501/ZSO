@@ -13,7 +13,7 @@
 
 // Global state
 static pid_t master_pid = 0;
-static pid_t slave_pids[NUM_SLAVES];
+static pid_t slave_pids[MAX_SLAVES];
 static int num_slaves_started = 0;
 static volatile sig_atomic_t should_exit = 0;
 
@@ -51,7 +51,7 @@ static void cleanup_processes(void) {
 
 static void show_help(const char *program_name) {
     printf("Usage: %s <num_slaves>\n", program_name);
-    printf("  num_slaves: 1-%d\n", NUM_SLAVES);
+    printf("  num_slaves: 1-%d\n", MAX_SLAVES);
 }
 
 int main(int argc, char *argv[]) {
@@ -63,13 +63,13 @@ int main(int argc, char *argv[]) {
     }
     
     num_slaves = atoi(argv[1]);
-    if (num_slaves <= 0 || num_slaves > NUM_SLAVES) {
-        fprintf(stderr, "Error: Number of slaves must be 1-%d\n", NUM_SLAVES);
+    if (num_slaves <= 0 || num_slaves > MAX_SLAVES) {
+        fprintf(stderr, "Error: Number of slaves must be 1-%d\n", MAX_SLAVES);
         show_help(argv[0]);
         return 1;
     }
     
-    for (int i = 0; i < NUM_SLAVES; i++) {
+    for (int i = 0; i < MAX_SLAVES; i++) {
         slave_pids[i] = 0;
     }
     

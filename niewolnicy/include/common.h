@@ -48,9 +48,9 @@ typedef struct {
 typedef struct {
     pthread_mutex_t mutex;
     pid_t master_pid;
-    int messages_sent[NUM_SLAVES];
-    int messages_received[NUM_SLAVES];
-    int active_slaves[NUM_SLAVES];
+    int messages_sent[MAX_SLAVES];
+    int messages_received[MAX_SLAVES];
+    int active_slaves[MAX_SLAVES];
     unsigned int magic;
 } stats_t;
 

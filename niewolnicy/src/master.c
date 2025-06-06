@@ -14,7 +14,7 @@
 
 // Global state
 static int master_fd = -1;
-static int slave_fds[NUM_SLAVES];
+static int slave_fds[MAX_SLAVES];
 static stats_t *stats = NULL;
 static sem_t *stats_sem = NULL;
 static volatile sig_atomic_t should_exit = 0;
@@ -77,7 +77,7 @@ static int setup_semaphore(void) {
 
 static void handle_register(const message_t *msg) {
     int id = msg->slave_id;
-    DEBUG_ASSERT(id >= 0 && id < NUM_SLAVES, "Valid slave ID");
+    DEBUG_ASSERT(id >= 0 && id < MAX_SLAVES, "Valid slave ID");
     
     // Close old connection if exists
     if (slave_fds[id] >= 0) {
@@ -104,7 +104,7 @@ static void handle_register(const message_t *msg) {
 
 static void handle_unregister(const message_t *msg) {
     int id = msg->slave_id;
-    DEBUG_ASSERT(id >= 0 && id < NUM_SLAVES, "Valid slave ID");
+    DEBUG_ASSERT(id >= 0 && id < MAX_SLAVES, "Valid slave ID");
     
     if (slave_fds[id] >= 0) {
         close(slave_fds[id]);
@@ -122,7 +122,7 @@ static void handle_unregister(const message_t *msg) {
 
 static void handle_response(const message_t *msg) {
     int id = msg->slave_id;
-    DEBUG_ASSERT(id >= 0 && id < NUM_SLAVES, "Valid slave ID");
+    DEBUG_ASSERT(id >= 0 && id < MAX_SLAVES, "Valid slave ID");
     
     pthread_mutex_lock(&stats->mutex);
     stats->messages_received[id]++;
@@ -149,7 +149,7 @@ static void send_queries(void) {
     static int query_counter = 0;
     query_counter++;
     
-    for (int i = 0; i < NUM_SLAVES; i++) {
+    for (int i = 0; i < MAX_SLAVES; i++) {
         if (slave_fds[i] < 0) continue;
         
         message_t msg = {
@@ -187,7 +187,7 @@ static void signal_stats_ready(void) {
     int total_sent = 0, total_received = 0, active_count = 0;
     
     printf("\nSlave Status:\n");
-    for (int i = 0; i < NUM_SLAVES; i++) {
+    for (int i = 0; i < MAX_SLAVES; i++) {
         if (stats->active_slaves[i]) {
             printf("  Slave %d: ACTIVE, sent=%d, received=%d\n", 
                    i, stats->messages_sent[i], stats->messages_received[i]);
@@ -209,7 +209,7 @@ static void signal_stats_ready(void) {
 
 static void cleanup(void) {
     // Close slave connections
-    for (int i = 0; i < NUM_SLAVES; i++) {
+    for (int i = 0; i < MAX_SLAVES; i++) {
         if (slave_fds[i] >= 0) {
             close(slave_fds[i]);
         }
@@ -238,7 +238,7 @@ static void cleanup(void) {
 
 int main(void) {
     // Initialize slave FDs
-    for (int i = 0; i < NUM_SLAVES; i++) {
+    for (int i = 0; i < MAX_SLAVES; i++) {
         slave_fds[i] = -1;
     }
     
