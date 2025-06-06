@@ -82,7 +82,7 @@ int main(int argc, char *argv[]) {
     // Setup signal handling
     signal(SIGINT, handle_signal);
     signal(SIGTERM, handle_signal);
-    signal(SIGTSTP, handle_signal);  // Ctrl+Z for stats
+    signal(SIGQUIT, handle_signal);  // Ctrl+\ for stats
     signal(SIGUSR2, handle_signal);  // External signal forwarding for tests
     atexit(cleanup_processes);
     
@@ -133,7 +133,7 @@ int main(int argc, char *argv[]) {
     
     printf("Master-Slave IPC System running with %d slaves\n", num_slaves);
     printf("Master PID: %d (managed by main)\n", master_pid);
-    printf("Press Ctrl+Z to display statistics, Ctrl+C to stop\n");
+    printf("Press Ctrl+\\ to display statistics, Ctrl+C to stop\n");
     
     // Main loop - just wait for processes to exit or signals
     while (!should_exit) {
