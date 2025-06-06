@@ -11,9 +11,9 @@ make clean >/dev/null 2>&1
 make >/dev/null 2>&1
 echo "✅ Built"
 
-# Test 1: 10 signals with 0.01s delay
+# Test 1: 10 signals with 0.001s delay
 echo
-echo "Test 1: 10 signals with 0.01s delay"
+echo "Test 1: 10 signals with 0.001s delay"
 echo "----------------------------------"
 
 ./main 2 > test1.log 2>&1 &
@@ -21,7 +21,7 @@ PID=$!
 
 sleep 0.1  # Let it start
 
-echo "Sending 10 signals with 0.01s delay..."
+echo "Sending 10 signals with 0.001s delay..."
 for i in {1..10}; do
     kill -USR2 $PID
     sleep 0.001
@@ -114,7 +114,7 @@ echo "Interactive stats: $INTERACTIVE_STATS"
 # Summary
 echo
 echo "=== Results ==="
-echo "0.1s delay:     $STATS1/10 ($([ "$STATS1" -eq 10 ] && echo "✅ PERFECT" || echo "⚠️  $STATS1 received"))"
+echo "0.001s delay:     $STATS1/10 ($([ "$STATS1" -eq 10 ] && echo "✅ PERFECT" || echo "⚠️  $STATS1 received"))"
 echo "No delay:       $STATS2/10 ($([ "$STATS2" -ge 5 ] && echo "✅ GOOD" || echo "⚠️  Only $STATS2"))"
 echo "Natural stats:  $NATURAL_STATS ($([ "$NATURAL_STATS" -ge 1 ] && echo "✅ CAPTURED" || echo "❌ MISSED"))"
 echo "Interactive:    $INTERACTIVE_STATS ($([ "$INTERACTIVE_STATS" -ge 1 ] && echo "✅ WORKING" || echo "❌ BROKEN"))"
