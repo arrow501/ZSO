@@ -33,9 +33,9 @@ BOLD='\033[1m'
 NC='\033[0m' # No Color
 
 # Default program path is empty (must be specified)
-PROGRAM=""
+PROGRAM="main"
 # Program arguments (empty by default)
-PROG_ARGS=""
+PROG_ARGS="5"
 
 # Create logs directory if it doesn't exist
 mkdir -p ./valgrind_logs
