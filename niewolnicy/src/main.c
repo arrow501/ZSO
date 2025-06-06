@@ -12,13 +12,20 @@ static pid_t master_pid = 0;
 static pid_t slave_pids[MAX_SLAVES];
 static int num_slaves = 0;
 static volatile sig_atomic_t should_exit = 0;
-static volatile sig_atomic_t stats_requests = 0;  // Counter, not flag!
 
 static void handle_signal(int sig) {
     if (sig == SIGINT || sig == SIGTERM) {
         should_exit = 1;
-    } else if (sig == SIGQUIT || sig == SIGUSR2) {
-        stats_requests++;  // Increment counter - each signal counts
+        
+        // Forward signal to all children
+        if (master_pid > 0) {
+            kill(master_pid, sig);
+        }
+        for (int i = 0; i < num_slaves; i++) {
+            if (slave_pids[i] > 0) {
+                kill(slave_pids[i], sig);
+            }
+        }
     }
 }
 
@@ -73,10 +80,10 @@ int main(int argc, char *argv[]) {
     }
     
     // Setup signal handling
-    signal(SIGINT, handle_signal);
-    signal(SIGTERM, handle_signal);
-    signal(SIGQUIT, handle_signal);  // Ctrl+\ for stats
-    signal(SIGUSR2, handle_signal);  // External signal forwarding for tests
+    signal(SIGINT, handle_signal);    // Ctrl+C for stats (unusual but works)
+    signal(SIGTERM, handle_signal);   // Terminate 
+    signal(SIGQUIT, handle_signal);   // Ctrl+\ to terminate
+    signal(SIGUSR2, handle_signal);   // External signal forwarding for tests
     atexit(cleanup_processes);
     
 #if ENABLE_PRINTING
@@ -126,26 +133,10 @@ int main(int argc, char *argv[]) {
     
     printf("Master-Slave IPC System running with %d slaves\n", num_slaves);
     printf("Master PID: %d (managed by main)\n", master_pid);
-    printf("Press Ctrl+\\ to display statistics, Ctrl+C to stop\n");
+    printf("Press Ctrl+C to display statistics, Ctrl+\\ to stop\n");
     
-    // Main loop - handle signals properly in the loop
+    // Main loop - just wait for processes to exit or signals
     while (!should_exit) {
-        // Handle stats requests (from Ctrl+\ or SIGUSR2) - process ALL pending
-        sig_atomic_t pending_requests = stats_requests;
-        if (pending_requests > 0) {
-            // Forward each request to master
-            for (sig_atomic_t i = 0; i < pending_requests; i++) {
-                if (master_pid > 0) {
-#if ENABLE_PRINTING
-                    printf("Main: Forwarding stats request %d to master (PID=%d)\n", (int)i+1, master_pid);
-#endif
-                    kill(master_pid, SIGUSR1);
-                }
-            }
-            // Atomically subtract the requests we just processed
-            stats_requests -= pending_requests;
-        }
-        
         // Check for child process exits
         int status;
         pid_t exited_pid = waitpid(-1, &status, WNOHANG);
@@ -187,16 +178,6 @@ int main(int argc, char *argv[]) {
         
         // Small delay to prevent busy waiting
         for (volatile int i = 0; i < 10000; i++);
-    }
-    
-    // Shutdown sequence - send signals to all children
-    if (master_pid > 0) {
-        kill(master_pid, SIGTERM);
-    }
-    for (int i = 0; i < num_slaves; i++) {
-        if (slave_pids[i] > 0) {
-            kill(slave_pids[i], SIGTERM);
-        }
     }
     
 #if ENABLE_PRINTING

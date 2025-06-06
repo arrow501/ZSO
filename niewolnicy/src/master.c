@@ -19,9 +19,6 @@ static volatile sig_atomic_t stats_requests = 0;  // Simple atomic counter
 
 static void handle_signal(int sig) {
     if (sig == SIGINT || sig == SIGTERM) {
-#if ENABLE_PRINTING
-        printf("Master: Received exit signal %d\n", sig);
-#endif
         should_exit = 1;
     } else if (sig == SIGUSR1) {
         // Simply increment counter - atomic
@@ -69,31 +66,33 @@ static void setup_shared_memory(void) {
 }
 
 static void display_stats(void) {
-    // Simplified stats without mutex to test if that's the issue
-    printf("\n=== Master Statistics (DEBUG) ===\n");
+    pthread_mutex_lock(&stats->mutex);
+    
+    printf("\n=== Master Statistics ===\n");
     printf("Master PID: %d\n", getpid());
+    printf("\nSlave Status:\n");
     
-    if (stats == NULL) {
-        printf("ERROR: stats is NULL!\n");
-        return;
-    }
+    int total_sent = 0, total_received = 0, active_count = 0;
     
-    if (stats->magic != STATS_MAGIC) {
-        printf("ERROR: stats magic is wrong: 0x%x (expected 0x%x)\n", 
-               stats->magic, STATS_MAGIC);
-        return;
-    }
-    
-    printf("Stats memory looks OK\n");
-    printf("Active slaves: ");
     for (int i = 0; i < MAX_SLAVES; i++) {
         if (stats->active_slaves[i]) {
-            printf("%d ", i);
+            printf("  Slave %d: ACTIVE, sent=%d, received=%d\n", 
+                   i, stats->messages_sent[i], stats->messages_received[i]);
+            active_count++;
         }
+        total_sent += stats->messages_sent[i];
+        total_received += stats->messages_received[i];
     }
-    printf("\n========================\n");
     
-    // DON'T use mutex for now - just test basic access
+    if (active_count == 0) {
+        printf("  No active slaves\n");
+    }
+    
+    printf("\nTotals: %d active slaves, %d sent, %d received\n", 
+           active_count, total_sent, total_received);
+    printf("========================\n");
+    
+    pthread_mutex_unlock(&stats->mutex);
 }
 
 static void handle_register(const message_t *msg) {
@@ -222,6 +221,7 @@ int main(void) {
     // Setup signals
     signal(SIGINT, handle_signal);
     signal(SIGTERM, handle_signal);
+    signal(SIGQUIT, handle_signal);
     signal(SIGUSR1, handle_signal);
     signal(SIGPIPE, SIG_IGN);
     atexit(cleanup);
@@ -252,16 +252,10 @@ int main(void) {
         // 1. Check for pending stats requests (simplified signal handling)
         sig_atomic_t pending_requests = stats_requests;
         if (pending_requests > 0) {
-#if ENABLE_PRINTING
-            printf("Master: Processing %d stats requests\n", (int)pending_requests);
-#endif
             for (sig_atomic_t i = 0; i < pending_requests; i++) {
                 display_stats();
             }
             stats_requests -= pending_requests;
-#if ENABLE_PRINTING
-            printf("Master: Finished processing stats requests\n");
-#endif
         }
         
         // 2. Check for messages from slaves (register/unregister/response)
