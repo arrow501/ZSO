@@ -165,15 +165,11 @@ echo "DRD:"
 grep "ERROR SUMMARY:" drd.out 2>/dev/null || echo "No output"
 
 echo
-echo "Signal spam:"
+echo "Helgrind - Signal spam:"
 grep "ERROR SUMMARY:" helgrind_spam.out 2>/dev/null || echo "No output"
 
 echo
-echo "Burst signals:"
+echo "DRD - Burst signals:"
 grep "ERROR SUMMARY:" drd_burst.out 2>/dev/null || echo "No output"
-
-# Race condition details
-RACE_COUNT=$(grep -c "Possible data race" helgrind_spam.out 2>/dev/null || echo "0")
-DRD_RACES=$(grep -c "data race" drd_burst.out 2>/dev/null || echo "0")
 
 make clean >/dev/null 2>&1

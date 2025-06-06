@@ -28,18 +28,15 @@ main: $(SRCDIR)/main.c include/common.h include/parameters.h
 debug: CFLAGS += -DENABLE_PRINTING=1 -DENABLE_ASSERTS=1 -O0 -g3
 debug: clean all
 
-# Release mode (force release settings)
+# Release mode (force release settings)  
 release: CFLAGS += -DENABLE_PRINTING=0 -DENABLE_ASSERTS=0 -O2 -DNDEBUG
 release: clean all
-
 
 # Cleanup (only our files with full UUID)
 clean:
 	rm -f master slave main
 	rm -f /tmp/master_fifo_2e518cc1-6b7d-45c9-a7f6-1a7d35fcbb3f 2>/dev/null || true
 	rm -f /tmp/slave_fifo_2e518cc1-6b7d-45c9-a7f6-1a7d35fcbb3f_* 2>/dev/null || true
-	rm -f /tmp/master_pid_2e518cc1-6b7d-45c9-a7f6-1a7d35fcbb3f 2>/dev/null || true
 	rm -f /dev/shm/master_stats_2e518cc1-6b7d-45c9-a7f6-1a7d35fcbb3f 2>/dev/null || true
-	rm -f /dev/shm/sem.stats_ready_2e518cc1-6b7d-45c9-a7f6-1a7d35fcbb3f 2>/dev/null || true
 
-.PHONY: all clean debug release test
+.PHONY: all clean debug release

@@ -17,6 +17,7 @@ static int messages_processed = 0;
 static char slave_fifo[256];
 
 static void handle_signal(int sig) {
+    (void)sig; 
     should_exit = 1;
 }
 
