@@ -66,13 +66,13 @@ static void cleanup_processes(void) {
 }
 
 static int wait_for_master_ready(void) {
-    // Wait for master to create PID file
-    for (int i = 0; i < 100; i++) { // 10 seconds max with 100ms polls
+    // Wait for master to create PID file (poll-based, no time dependency)
+    for (int i = 0; i < 1000; i++) { // Max iterations instead of time
         if (file_exists(MASTER_PID_FILE)) {
             return 0;
         }
-        // No usleep - just busy wait briefly
-        for (volatile int j = 0; j < 100000; j++);
+        // Brief CPU pause without time dependency
+        for (volatile int j = 0; j < 10000; j++);
     }
     return -1;
 }
@@ -193,8 +193,8 @@ int main(int argc, char *argv[]) {
             perror("waitpid");
             break;
         } else {
-            // No children exited, brief pause without sleep
-            for (volatile int i = 0; i < 100000; i++);
+            // No children exited, brief CPU pause
+            for (volatile int i = 0; i < 10000; i++);
         }
     }
     

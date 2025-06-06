@@ -43,20 +43,15 @@ static void display_stats(const stats_t *stats) {
 }
 
 static void wait_and_display_stats(stats_t *stats, sem_t *sem) {
-    struct timespec timeout;
-    clock_gettime(CLOCK_REALTIME, &timeout);
-    timeout.tv_sec += 2;  // 2 second timeout
-    
-    int ret = sem_timedwait(sem, &timeout);
+    // Simple blocking wait without timeout
+    int ret = sem_wait(sem);
     
     if (ret == 0) {
         pthread_mutex_lock(&stats->mutex);
         display_stats(stats);
         pthread_mutex_unlock(&stats->mutex);
-    } else if (errno == ETIMEDOUT) {
-        printf("Timeout waiting for stats update\n");
     } else {
-        perror("sem_timedwait");
+        perror("sem_wait");
     }
 }
 
