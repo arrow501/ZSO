@@ -9,7 +9,7 @@
 
 /** Number of slave processes */
 #ifndef NUM_SLAVES
-#define NUM_SLAVES 3
+#define NUM_SLAVES 10
 #endif
 
 /** Number of messages each slave should process before exiting */

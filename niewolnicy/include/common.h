@@ -7,7 +7,6 @@
 #include <assert.h>
 #include <sys/stat.h>
 #include <stdio.h>
-#include <semaphore.h>
 
 // Assertion macro - only active when enabled
 #if ENABLE_ASSERTS
@@ -63,9 +62,5 @@ static inline int file_exists(const char *path) {
     struct stat st;
     return stat(path, &st) == 0;
 }
-
-// Function prototypes for stats_reader functions
-int setup_stats_monitoring(pid_t master_pid, stats_t **stats_ptr, sem_t **sem_ptr);
-int trigger_and_display_stats(pid_t master_pid, stats_t *stats, sem_t *sem);
 
 #endif /* COMMON_H */
