@@ -24,7 +24,7 @@ sleep 0.1  # Let it start
 echo "Sending 10 signals with 0.01s delay..."
 for i in {1..10}; do
     kill -USR2 $PID
-    sleep 0.01
+    sleep 0.001
 done
 
 sleep 1
