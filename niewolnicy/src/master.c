@@ -7,69 +7,63 @@
 #include <sys/stat.h>
 #include <sys/mman.h>
 #include <errno.h>
-#include <poll.h>
 #include <semaphore.h>
 #include <pthread.h>
 #include "../include/common.h"
 
-// Global state
+// Global state - keep it minimal
 static int master_fd = -1;
 static int slave_fds[MAX_SLAVES];
 static stats_t *stats = NULL;
-static sem_t *stats_sem = NULL;
 static volatile sig_atomic_t should_exit = 0;
-static volatile sig_atomic_t stats_signals_pending = 0;
+static volatile sig_atomic_t stats_requests = 0;  // Simple atomic counter
 
 static void handle_signal(int sig) {
     if (sig == SIGINT || sig == SIGTERM) {
         should_exit = 1;
     } else if (sig == SIGUSR1) {
-        stats_signals_pending++;  // Count each signal atomically
+        // Simply increment counter - atomic on most platforms
+        stats_requests++;
     }
 }
 
 static void write_pid_file(void) {
     FILE *f = fopen(MASTER_PID_FILE, "w");
-    DEBUG_ASSERT(f != NULL, "Should be able to create PID file");
+    if (!f) {
+        perror("fopen PID file");
+        exit(1);
+    }
     fprintf(f, "%d\n", getpid());
     fclose(f);
-    
-#if ENABLE_PRINTING
-    printf("Master PID %d written to %s\n", getpid(), MASTER_PID_FILE);
-#endif
 }
 
-static int setup_shared_memory(void) {
+static void setup_shared_memory(void) {
+    // Clean up any old shared memory
     shm_unlink(SHM_NAME);
     
     int shm_fd = shm_open(SHM_NAME, O_CREAT | O_RDWR | O_EXCL, 0666);
     if (shm_fd < 0) {
         perror("shm_open");
-        return -1;
+        exit(1);
     }
     
     if (ftruncate(shm_fd, sizeof(stats_t)) != 0) {
         perror("ftruncate");
-        close(shm_fd);
-        return -1;
+        exit(1);
     }
     
     stats = mmap(NULL, sizeof(stats_t), PROT_READ | PROT_WRITE, MAP_SHARED, shm_fd, 0);
     close(shm_fd);
     if (stats == MAP_FAILED) {
         perror("mmap");
-        return -1;
+        exit(1);
     }
     
-    // Simple mutex initialization
+    // Initialize mutex for process sharing
     pthread_mutexattr_t attr;
     pthread_mutexattr_init(&attr);
     pthread_mutexattr_setpshared(&attr, PTHREAD_PROCESS_SHARED);
-    if (pthread_mutex_init(&stats->mutex, &attr) != 0) {
-        perror("pthread_mutex_init");
-        pthread_mutexattr_destroy(&attr);
-        return -1;
-    }
+    pthread_mutex_init(&stats->mutex, &attr);
     pthread_mutexattr_destroy(&attr);
     
     // Initialize stats
@@ -78,26 +72,41 @@ static int setup_shared_memory(void) {
     memset(stats->messages_received, 0, sizeof(stats->messages_received));
     memset(stats->active_slaves, 0, sizeof(stats->active_slaves));
     stats->magic = STATS_MAGIC;
-    
-    return 0;
 }
 
-static int setup_semaphore(void) {
-    sem_unlink(SEM_NAME);
-    stats_sem = sem_open(SEM_NAME, O_CREAT | O_EXCL, 0666, 0);
-    if (stats_sem == SEM_FAILED) {
-        perror("sem_open");
-        return -1;
+static void display_stats(void) {
+    pthread_mutex_lock(&stats->mutex);
+    
+    printf("\n=== Master Statistics ===\n");
+    printf("Master PID: %d\n", getpid());
+    printf("\nSlave Status:\n");
+    
+    int total_sent = 0, total_received = 0, active_count = 0;
+    
+    for (int i = 0; i < MAX_SLAVES; i++) {
+        if (stats->active_slaves[i]) {
+            printf("  Slave %d: ACTIVE, sent=%d, received=%d\n", 
+                   i, stats->messages_sent[i], stats->messages_received[i]);
+            active_count++;
+        }
+        total_sent += stats->messages_sent[i];
+        total_received += stats->messages_received[i];
     }
-    return 0;
+    
+    if (active_count == 0) {
+        printf("  No active slaves\n");
+    }
+    
+    printf("\nTotals: %d active slaves, %d sent, %d received\n", 
+           active_count, total_sent, total_received);
+    printf("========================\n");
+    
+    pthread_mutex_unlock(&stats->mutex);
 }
 
 static void handle_register(const message_t *msg) {
     int id = msg->slave_id;
-    if (id < 0 || id >= MAX_SLAVES) {
-        fprintf(stderr, "Invalid slave ID: %d\n", id);
-        return;
-    }
+    if (id < 0 || id >= MAX_SLAVES) return;
     
     // Close old connection if exists
     if (slave_fds[id] >= 0) {
@@ -107,12 +116,8 @@ static void handle_register(const message_t *msg) {
     // Open slave FIFO
     char slave_fifo[256];
     snprintf(slave_fifo, sizeof(slave_fifo), "%s%d", SLAVE_FIFO_PREFIX, id);
-    if (!file_exists(slave_fifo)) {
-        fprintf(stderr, "Slave FIFO does not exist: %s\n", slave_fifo);
-        return;
-    }
     
-    slave_fds[id] = open(slave_fifo, O_WRONLY);
+    slave_fds[id] = open(slave_fifo, O_WRONLY | O_NONBLOCK);
     if (slave_fds[id] < 0) {
         perror("open slave FIFO");
         return;
@@ -130,10 +135,7 @@ static void handle_register(const message_t *msg) {
 
 static void handle_unregister(const message_t *msg) {
     int id = msg->slave_id;
-    if (id < 0 || id >= MAX_SLAVES) {
-        fprintf(stderr, "Invalid slave ID: %d\n", id);
-        return;
-    }
+    if (id < 0 || id >= MAX_SLAVES) return;
     
     if (slave_fds[id] >= 0) {
         close(slave_fds[id]);
@@ -151,31 +153,11 @@ static void handle_unregister(const message_t *msg) {
 
 static void handle_response(const message_t *msg) {
     int id = msg->slave_id;
-    if (id < 0 || id >= MAX_SLAVES) {
-        fprintf(stderr, "Invalid slave ID: %d\n", id);
-        return;
-    }
+    if (id < 0 || id >= MAX_SLAVES) return;
     
     pthread_mutex_lock(&stats->mutex);
     stats->messages_received[id]++;
     pthread_mutex_unlock(&stats->mutex);
-}
-
-static void process_message(const message_t *msg) {
-    switch (msg->type) {
-        case MSG_REGISTER:
-            handle_register(msg);
-            break;
-        case MSG_UNREGISTER:
-            handle_unregister(msg);
-            break;
-        case MSG_RESPONSE:
-            handle_response(msg);
-            break;
-        default:
-            fprintf(stderr, "Unknown message type: %d\n", msg->type);
-            break;
-    }
 }
 
 static void send_queries(void) {
@@ -191,7 +173,8 @@ static void send_queries(void) {
             .payload = query_counter
         };
         
-        if (write(slave_fds[i], &msg, sizeof(msg)) == sizeof(msg)) {
+        ssize_t written = write(slave_fds[i], &msg, sizeof(msg));
+        if (written == sizeof(msg)) {
             pthread_mutex_lock(&stats->mutex);
             stats->messages_sent[i]++;
             pthread_mutex_unlock(&stats->mutex);
@@ -204,47 +187,10 @@ static void send_queries(void) {
             pthread_mutex_unlock(&stats->mutex);
         }
     }
-    
-#if ENABLE_PRINTING
-    printf("Master: Sent query %d to active slaves\n", query_counter);
-#endif
-}
-
-static void signal_stats_ready(void) {
-    if (sem_post(stats_sem) != 0) {
-        perror("sem_post");
-        return;
-    }
-    
-    // Also display stats directly in master (simplified)
-    printf("\n=== Master Statistics ===\n");
-    printf("Master PID: %d\n", getpid());
-    
-    int total_sent = 0, total_received = 0, active_count = 0;
-    
-    printf("\nSlave Status:\n");
-    for (int i = 0; i < MAX_SLAVES; i++) {
-        if (stats->active_slaves[i]) {
-            printf("  Slave %d: ACTIVE, sent=%d, received=%d\n", 
-                   i, stats->messages_sent[i], stats->messages_received[i]);
-            active_count++;
-        }
-        // Only count totals, don't print inactive ones
-        total_sent += stats->messages_sent[i];
-        total_received += stats->messages_received[i];
-    }
-    
-    if (active_count == 0) {
-        printf("  No active slaves\n");
-    }
-    
-    printf("\nTotals: %d active slaves, %d sent, %d received\n", 
-           active_count, total_sent, total_received);
-    printf("========================\n");
 }
 
 static void cleanup(void) {
-    // Close slave connections
+    // Close all slave connections
     for (int i = 0; i < MAX_SLAVES; i++) {
         if (slave_fds[i] >= 0) {
             close(slave_fds[i]);
@@ -264,47 +210,27 @@ static void cleanup(void) {
         munmap(stats, sizeof(stats_t));
     }
     shm_unlink(SHM_NAME);
-    
-    // Cleanup semaphore
-    if (stats_sem != NULL) {
-        sem_close(stats_sem);
-    }
-    sem_unlink(SEM_NAME);
 }
 
 int main(void) {
-    // Initialize slave FDs
+    // Initialize
     for (int i = 0; i < MAX_SLAVES; i++) {
         slave_fds[i] = -1;
     }
     
-    // Setup signal handling
+    // Setup signals
     signal(SIGINT, handle_signal);
     signal(SIGTERM, handle_signal);
     signal(SIGUSR1, handle_signal);
     signal(SIGPIPE, SIG_IGN);
-    
     atexit(cleanup);
     
-    // Write PID file first
+    // Setup IPC
     write_pid_file();
-    
-    // Setup IPC - ZAWSZE wymagane!
-    if (setup_shared_memory() != 0) {
-        fprintf(stderr, "Failed to setup shared memory\n");
-        exit(1);
-    }
-    if (setup_semaphore() != 0) {
-        fprintf(stderr, "Failed to setup semaphore\n");  
-        exit(1);
-    }
+    setup_shared_memory();
     
     // Create master FIFO
     unlink(MASTER_FIFO);
-    if (file_exists(MASTER_FIFO)) {
-        fprintf(stderr, "Failed to remove old FIFO\n");
-        exit(1);
-    }
     if (mkfifo(MASTER_FIFO, 0666) != 0) {
         perror("mkfifo");
         exit(1);
@@ -318,40 +244,49 @@ int main(void) {
     
 #if ENABLE_PRINTING
     printf("Master: Started (PID=%d)\n", getpid());
-    printf("Master: Send SIGUSR1 to display stats\n");
 #endif
     
-    // Main loop
-    struct pollfd pfd = { .fd = master_fd, .events = POLLIN };
-    
+    // Main loop - much simpler!
+    int loop_count = 0;
     while (!should_exit) {
-        // Handle all pending stats requests
-        while (stats_signals_pending > 0) {
-            stats_signals_pending--;  // Process one signal
-            signal_stats_ready();
+        // Check for pending stats requests
+        sig_atomic_t pending_requests = stats_requests;
+        if (pending_requests > 0) {
+            // Display stats for each pending request
+            for (sig_atomic_t i = 0; i < pending_requests; i++) {
+                display_stats();
+            }
+            // Atomically subtract the requests we just processed
+            stats_requests -= pending_requests;
         }
         
-        // Poll for messages
-        int ret = poll(&pfd, 1, POLL_TIMEOUT_MS);
-        
-        if (ret > 0 && (pfd.revents & POLLIN)) {
-            message_t msg;
-            while (read(master_fd, &msg, sizeof(msg)) == sizeof(msg)) {
-                process_message(&msg);
+        // Check for messages from slaves
+        message_t msg;
+        while (read(master_fd, &msg, sizeof(msg)) == sizeof(msg)) {
+            switch (msg.type) {
+                case MSG_REGISTER:
+                    handle_register(&msg);
+                    break;
+                case MSG_UNREGISTER:
+                    handle_unregister(&msg);
+                    break;
+                case MSG_RESPONSE:
+                    handle_response(&msg);
+                    break;
+                default:
+                    break;
             }
         }
         
-        // Send periodic queries (poll-count based, no time logic)
-        static int poll_count = 0;
-        if (++poll_count >= 10) { // Every 10 poll cycles
+        // Send periodic queries (every 1000 loop iterations)
+        if (++loop_count >= 1000) {
             send_queries();
-            poll_count = 0;
+            loop_count = 0;
         }
+        
+        // Small delay to prevent busy waiting
+        for (volatile int i = 0; i < 1000; i++);
     }
-    
-#if ENABLE_PRINTING
-    printf("Master: Shutting down\n");
-#endif
     
     return 0;
 }

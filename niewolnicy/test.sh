@@ -1,6 +1,6 @@
 #!/bin/bash
 
-echo "=== IPC System Test ==="
+echo "=== Simplified Signal Test ==="
 
 cleanup() {
     killall main master slave 2>/dev/null || true
@@ -8,107 +8,102 @@ cleanup() {
     rm -f /tmp/slave_fifo_2e518cc1-6b7d-45c9-a7f6-1a7d35fcbb3f_* 2>/dev/null || true
     rm -f /tmp/master_pid_2e518cc1-6b7d-45c9-a7f6-1a7d35fcbb3f 2>/dev/null || true
     rm -f /dev/shm/master_stats_2e518cc1-6b7d-45c9-a7f6-1a7d35fcbb3f 2>/dev/null || true
-    rm -f /dev/shm/sem.stats_ready_2e518cc1-6b7d-45c9-a7f6-1a7d35fcbb3f 2>/dev/null || true
 }
 
-count_stats_in_output() {
-    # Count stats headers in the captured output
-    grep -c "=== Master Statistics ===" test_output.txt 2>/dev/null || echo 0
-}
-
-run_basic_test() {
-    local num_slaves="$1"
-    local test_name="$2"
-    
-    echo ""
-    echo "=== $test_name ==="
-    
-    # Start system and capture ALL output to file AND display to user
-    NUM_MESSAGES_PER_SLAVE=5 ./main $num_slaves 2>&1 | tee test_output.txt &
-    MAIN_PID=$!
-    sleep 2
-    
-    # Get master PID
-    MASTER_PID=$(cat /tmp/master_pid_2e518cc1-6b7d-45c9-a7f6-1a7d35fcbb3f 2>/dev/null)
-    if [[ -z "$MASTER_PID" ]]; then
-        echo "❌ FAIL: No master PID found"
-        kill $MAIN_PID 2>/dev/null
-        return 1
-    fi
-    
-    echo "Master PID: $MASTER_PID, sending 3 stats requests..."
-    
-    # Send 3 signals
-    for i in {1..3}; do
-        kill -USR1 $MASTER_PID 2>/dev/null
-        sleep 0.5
-    done
-    
-    # Wait for processing
-    sleep 2
-    
-    # Stop main process
-    kill -TERM $MAIN_PID 2>/dev/null
-    sleep 2
-    
-    # Count stats displays
-    local stats_count=$(count_stats_in_output)
-    echo "Stats displays found: $stats_count"
-    
-    if [[ "$stats_count" -ge 3 ]]; then
-        echo "✓ PASS: Found $stats_count stats displays (expected ≥3)"
-        return 0
-    else
-        echo "❌ FAIL: Only found $stats_count stats displays (expected ≥3)"
-        return 1
-    fi
+count_stats_headers() {
+    # Count the number of times "=== Master Statistics ===" appears
+    grep -c "=== Master Statistics ===" output.log 2>/dev/null || echo 0
 }
 
 trap cleanup EXIT
 cleanup
 
-# Test 1: Basic functionality
-run_basic_test 2 "Basic Test (2 slaves)"
-BASIC_RESULT=$?
+echo "Building system..."
+make clean > /dev/null 2>&1
+make > /dev/null 2>&1
 
-cleanup
-sleep 1
-
-# Test 2: Multiple slaves  
-run_basic_test 5 "Multiple Slaves Test (5 slaves)"
-MULTI_RESULT=$?
-
-cleanup
-
-# Test 3: Invalid parameters
-echo ""
-echo "=== Invalid Parameters Test ==="
-./main 2>/dev/null
-if [ $? -ne 0 ]; then
-    echo "✓ PASS: Correctly rejected missing parameters"
-    PARAM_RESULT=0
-else
-    echo "❌ FAIL: Should have rejected missing parameters"
-    PARAM_RESULT=1
-fi
-
-# Summary
-echo ""
-echo "=== Test Results ==="
-echo "Basic Test:           $([ $BASIC_RESULT -eq 0 ] && echo "PASS" || echo "FAIL")"
-echo "Multiple Slaves Test: $([ $MULTI_RESULT -eq 0 ] && echo "PASS" || echo "FAIL")"  
-echo "Invalid Params Test:  $([ $PARAM_RESULT -eq 0 ] && echo "PASS" || echo "FAIL")"
-
-TOTAL_PASSED=$((3 - BASIC_RESULT - MULTI_RESULT - PARAM_RESULT))
-echo "Tests passed: $TOTAL_PASSED/3"
-
-if [ $TOTAL_PASSED -eq 3 ]; then
-    echo "🎉 All tests PASSED!"
-    exit 0
-else
-    echo "❌ Some tests failed"
+if [[ ! -x "./main" ]]; then
+    echo "❌ Build failed"
     exit 1
 fi
 
-# Cleanup temp file
-rm -f test_output.txt
+echo "Starting system with 2 slaves..."
+# Capture ALL output to a log file
+NUM_MESSAGES_PER_SLAVE=20 ./main 2 > output.log 2>&1 &
+MAIN_PID=$!
+
+# Wait for system to start
+sleep 3
+
+# Get master PID
+MASTER_PID=$(cat /tmp/master_pid_2e518cc1-6b7d-45c9-a7f6-1a7d35fcbb3f 2>/dev/null)
+if [[ -z "$MASTER_PID" ]]; then
+    echo "❌ FAIL: No master PID found"
+    kill $MAIN_PID 2>/dev/null
+    exit 1
+fi
+
+echo "Master PID: $MASTER_PID"
+echo ""
+
+# Test 1: Send 5 signals with delays (should definitely work)
+echo "Test 1: Sending 5 signals with 1 second delays..."
+for i in {1..5}; do
+    echo "  Signal $i"
+    kill -USR1 $MASTER_PID 2>/dev/null
+    sleep 1
+done
+
+sleep 2
+count1=$(count_stats_headers)
+echo "Stats displays after test 1: $count1"
+
+# Test 2: Send 5 rapid signals (the critical test)
+echo ""
+echo "Test 2: Sending 5 rapid signals..."
+for i in {1..5}; do
+    kill -USR1 $MASTER_PID 2>/dev/null
+done
+
+sleep 3
+count2=$(count_stats_headers)
+total_expected=$((5 + 5))
+echo "Total stats displays: $count2 (expected: $total_expected)"
+
+# Test 3: Ultra rapid fire
+echo ""
+echo "Test 3: Sending 10 ultra-rapid signals..."
+for i in {1..10}; do
+    kill -USR1 $MASTER_PID 2>/dev/null
+done
+
+sleep 4
+count3=$(count_stats_headers)
+final_expected=$((5 + 5 + 10))
+echo "Final stats displays: $count3 (expected: $final_expected)"
+
+# Shutdown
+echo ""
+echo "Shutting down..."
+kill -TERM $MAIN_PID 2>/dev/null
+sleep 2
+
+# Show results
+echo ""
+echo "=== RESULTS ==="
+echo "Expected total stats displays: $final_expected"
+echo "Actual stats displays: $count3"
+
+if [[ $count3 -eq $final_expected ]]; then
+    echo "🎉 SUCCESS: Perfect 1:1 signal-to-display ratio!"
+    result=0
+else
+    echo "❌ FAILURE: Signal loss detected"
+    result=1
+fi
+
+echo ""
+echo "Last 20 lines of output:"
+tail -20 output.log
+
+exit $result

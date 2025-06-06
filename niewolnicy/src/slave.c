@@ -6,68 +6,48 @@
 #include <signal.h>
 #include <sys/stat.h>
 #include <errno.h>
-#include <poll.h>
 #include "../include/common.h"
 
-// Global state
+// Global state - keep it minimal
 static volatile sig_atomic_t should_exit = 0;
-static volatile sig_atomic_t notify_master = 0;
 static int slave_id = -1;
 static int master_fd = -1;
+static int slave_fd = -1;
 static int messages_processed = 0;
+static char slave_fifo[256];
 
 static void handle_signal(int sig) {
     if (sig == SIGTERM || sig == SIGINT) {
-        notify_master = 1;
         should_exit = 1;
     }
 }
 
-static int send_to_master(const message_t *msg) {
-    if (master_fd < 0) {
-        fprintf(stderr, "Master fd not valid\n");
-        return -1;
+static void send_to_master(const message_t *msg) {
+    if (master_fd >= 0) {
+        write(master_fd, msg, sizeof(message_t));
     }
-    if (msg->slave_id != slave_id) {
-        fprintf(stderr, "Message slave_id mismatch\n");
-        return -1;
-    }
-    
-    ssize_t written = write(master_fd, msg, sizeof(message_t));
-    if (written != sizeof(message_t)) {
-        if (errno != EPIPE) {
-            perror("write to master");
-        }
-        return -1;
-    }
-    return 0;
 }
 
-static int register_with_master(void) {
+static void register_with_master(void) {
     message_t msg = {
         .type = MSG_REGISTER,
         .slave_id = slave_id,
         .payload = getpid()
     };
-    return send_to_master(&msg);
+    send_to_master(&msg);
 }
 
-static int unregister_from_master(void) {
+static void unregister_from_master(void) {
     message_t msg = {
         .type = MSG_UNREGISTER,
         .slave_id = slave_id,
         .payload = 0
     };
-    return send_to_master(&msg);
+    send_to_master(&msg);
 }
 
 static void process_query(const message_t *query) {
-    if (query->type != MSG_QUERY) {
-        fprintf(stderr, "Expected query message\n");
-        return;
-    }
-    if (query->slave_id != slave_id) {
-        fprintf(stderr, "Query not for this slave\n");
+    if (query->type != MSG_QUERY || query->slave_id != slave_id) {
         return;
     }
     
@@ -89,24 +69,24 @@ static void process_query(const message_t *query) {
     // Exit after processing enough messages
     if (messages_processed >= NUM_MESSAGES_PER_SLAVE) {
         should_exit = 1;
-        notify_master = 1;
     }
 }
 
-static void cleanup(const char *fifo_path) {
+static void cleanup(void) {
+    if (should_exit) {
+        unregister_from_master();
+    }
+    
+    if (slave_fd >= 0) {
+        close(slave_fd);
+    }
     if (master_fd >= 0) {
         close(master_fd);
     }
-    
-    if (fifo_path && fifo_path[0]) {
-        unlink(fifo_path);
-    }
+    unlink(slave_fifo);
 }
 
 int main(int argc, char *argv[]) {
-    char slave_fifo[256];
-    int slave_fd = -1;
-    
     // Parse arguments
     if (argc != 2) {
         fprintf(stderr, "Usage: %s <slave_id>\n", argv[0]);
@@ -123,14 +103,11 @@ int main(int argc, char *argv[]) {
     signal(SIGTERM, handle_signal);
     signal(SIGINT, handle_signal);
     signal(SIGPIPE, SIG_IGN);
+    atexit(cleanup);
     
     // Create slave FIFO
     snprintf(slave_fifo, sizeof(slave_fifo), "%s%d", SLAVE_FIFO_PREFIX, slave_id);
     unlink(slave_fifo);
-    if (file_exists(slave_fifo)) {
-        fprintf(stderr, "Failed to remove old slave FIFO\n");
-        return 1;
-    }
     if (mkfifo(slave_fifo, 0666) != 0) {
         perror("mkfifo");
         return 1;
@@ -144,13 +121,10 @@ int main(int argc, char *argv[]) {
     }
     
     // Register with master
-    if (register_with_master() != 0) {
-        fprintf(stderr, "Failed to register with master\n");
-        return 1;
-    }
+    register_with_master();
     
     // Open slave FIFO for reading
-    slave_fd = open(slave_fifo, O_RDONLY);
+    slave_fd = open(slave_fifo, O_RDONLY | O_NONBLOCK);
     if (slave_fd < 0) {
         perror("open slave FIFO");
         return 1;
@@ -160,55 +134,21 @@ int main(int argc, char *argv[]) {
     printf("Slave %d: Started (PID=%d)\n", slave_id, getpid());
 #endif
     
-    // Main loop
-    struct pollfd pfd = { .fd = slave_fd, .events = POLLIN };
-    
+    // Simple main loop
     while (!should_exit) {
-        // Handle unregister signal
-        if (notify_master) {
-            unregister_from_master();
-            notify_master = 0;
-        }
+        message_t msg;
+        ssize_t bytes = read(slave_fd, &msg, sizeof(msg));
         
-        // Poll for messages
-        int ret = poll(&pfd, 1, POLL_TIMEOUT_MS);
-        
-        if (ret < 0) {
-            if (errno == EINTR) continue;
-            perror("poll");
+        if (bytes == sizeof(msg)) {
+            process_query(&msg);
+        } else if (bytes == 0) {
+            // Master disconnected
             break;
         }
         
-        if (ret > 0 && (pfd.revents & POLLIN)) {
-            message_t msg;
-            ssize_t bytes = read(slave_fd, &msg, sizeof(msg));
-            
-            if (bytes == sizeof(msg)) {
-                if (msg.slave_id != slave_id) {
-                    fprintf(stderr, "Message not for this slave\n");
-                    continue;
-                }
-                
-                if (msg.type == MSG_QUERY) {
-                    process_query(&msg);
-                } else {
-                    fprintf(stderr, "Slave should only receive queries\n");
-                }
-            } else if (bytes == 0) {
-                // Master disconnected
-#if ENABLE_PRINTING
-                printf("Slave %d: Master disconnected\n", slave_id);
-#endif
-                break;
-            }
-        }
+        // Small delay to prevent busy waiting
+        for (volatile int i = 0; i < 1000; i++);
     }
-    
-    // Final cleanup
-    if (slave_fd >= 0) {
-        close(slave_fd);
-    }
-    cleanup(slave_fifo);
     
 #if ENABLE_PRINTING
     printf("Slave %d: Exiting (processed %d messages)\n", slave_id, messages_processed);
