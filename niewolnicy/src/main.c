@@ -18,8 +18,18 @@ static volatile sig_atomic_t should_exit = 0;
 static void handle_signal(int sig) {
     if (sig == SIGINT || sig == SIGTERM) {
         should_exit = 1;
+        
+        // Forward termination signals to all child processes
+        for (int i = 0; i < num_slaves_started; i++) {
+            if (slave_pids[i] > 0) {
+                kill(slave_pids[i], sig);
+            }
+        }
+        
+        if (master_pid > 0) {
+            kill(master_pid, sig);
+        }
     }
-    // Removed SIGUSR1 forwarding - tests signal master directly
 }
 
 static void cleanup_processes(void) {
@@ -27,6 +37,7 @@ static void cleanup_processes(void) {
     printf("Main: Cleaning up processes...\n");
 #endif
     
+    // Send SIGTERM to any remaining processes
     for (int i = 0; i < num_slaves_started; i++) {
         if (slave_pids[i] > 0) {
             kill(slave_pids[i], SIGTERM);
@@ -37,6 +48,7 @@ static void cleanup_processes(void) {
         kill(master_pid, SIGTERM);
     }
     
+    // Wait for children to exit gracefully
     int status;
     while (wait(&status) > 0) {
         // Reap children
