@@ -4,7 +4,7 @@ LDFLAGS = -pthread -lrt
 INCLUDES = -Iinclude
 SRCDIR = src
 
-# Release/Debug mode (default: release)
+# Release mode by default, debug as option
 DEBUG ?= 0
 ifeq ($(DEBUG),1)
     CFLAGS += -DENABLE_PRINTING=1 -DENABLE_ASSERTS=1 -O0 -g3
@@ -32,14 +32,11 @@ slave: $(SRCDIR)/slave.c include/common.h include/parameters.h
 main: $(SRCDIR)/main.c include/common.h include/parameters.h
 	$(CC) $(CFLAGS) $(INCLUDES) -o $@ $< $(LDFLAGS)
 
-# Build modes
-release: DEBUG=0
-release: clean all
-
+# Debug mode
 debug: DEBUG=1
 debug: clean all
 
-# Testing (always debug)
+# Testing (uses debug build)
 test: debug
 	./test.sh
 
@@ -49,4 +46,4 @@ clean:
 	rm -f /tmp/master_fifo_* /tmp/slave_fifo_* /tmp/master_pid_*
 	rm -f /dev/shm/master_stats_* /dev/shm/sem.stats_ready_*
 
-.PHONY: all clean debug release test
+.PHONY: all clean debug test

@@ -19,8 +19,6 @@ static volatile sig_atomic_t stats_requested = 0;
 static void handle_signal(int sig) {
     if (sig == SIGINT || sig == SIGTERM) {
         should_exit = 1;
-    } else if (sig == SIGUSR1) {
-        stats_requested = 1;
     }
 }
 
@@ -54,6 +52,21 @@ static void show_help(const char *program_name) {
     printf("  num_slaves: 1-%d\n", MAX_SLAVES);
 }
 
+static void request_stats(void) {
+    if (master_pid > 0) {
+        kill(master_pid, SIGUSR1);
+        stats_requested = 1;
+    }
+}
+
+static void wait_for_stats_display(void) {
+    // Simple wait for master to display stats
+    for (int i = 0; i < 100; i++) {
+        for (volatile int j = 0; j < 50000; j++);
+    }
+    stats_requested = 0;
+}
+
 int main(int argc, char *argv[]) {
     int num_slaves;
     
@@ -75,7 +88,6 @@ int main(int argc, char *argv[]) {
     
     signal(SIGINT, handle_signal);
     signal(SIGTERM, handle_signal);
-    signal(SIGUSR1, handle_signal);
     atexit(cleanup_processes);
     
 #if ENABLE_PRINTING
@@ -123,46 +135,15 @@ int main(int argc, char *argv[]) {
     
 #if ENABLE_PRINTING
     printf("Main: All processes started\n");
-    printf("Main: Send SIGUSR1 to this process (PID=%d) to display stats\n", getpid());
-    printf("Main: Press Ctrl+C to stop all processes\n");
-#else
-    printf("IPC system running with %d slaves (PID=%d)\n", num_slaves, getpid());
-    printf("Press Enter to display stats, Ctrl+C to exit\n");
 #endif
     
-    // Main monitoring loop
+    // Interactive mode - prompt for user input
+    printf("Master-Slave IPC System running with %d slaves\n", num_slaves);
+    printf("Press ENTER to display statistics, 'q' + ENTER to quit\n");
+    
+    char input[10];
     while (!should_exit) {
-        // Handle stats request
-        if (stats_requested) {
-            stats_requested = 0;
-            if (master_pid > 0) {
-                kill(master_pid, SIGUSR1);
-            }
-        }
-        
-#if !ENABLE_PRINTING
-        // In release mode, wait for user input (Enter key)
-        fd_set readfds;
-        struct timeval timeout;
-        
-        FD_ZERO(&readfds);
-        FD_SET(STDIN_FILENO, &readfds);
-        timeout.tv_sec = 0;
-        timeout.tv_usec = 100000; // 100ms timeout
-        
-        int ready = select(STDIN_FILENO + 1, &readfds, NULL, NULL, &timeout);
-        if (ready > 0 && FD_ISSET(STDIN_FILENO, &readfds)) {
-            char buffer[256];
-            if (fgets(buffer, sizeof(buffer), stdin)) {
-                // User pressed Enter - trigger stats
-                if (master_pid > 0) {
-                    kill(master_pid, SIGUSR1);
-                }
-            }
-        }
-#endif
-        
-        // Check for exited children
+        // Check for child process exits
         int status;
         pid_t exited_pid = waitpid(-1, &status, WNOHANG);
         
@@ -173,6 +154,7 @@ int main(int argc, char *argv[]) {
 #endif
                 master_pid = 0;
                 should_exit = 1;
+                break;
             } else {
                 for (int i = 0; i < num_slaves; i++) {
                     if (slave_pids[i] == exited_pid) {
@@ -194,14 +176,32 @@ int main(int argc, char *argv[]) {
                     printf("Main: All slaves have exited\n");
 #endif
                     should_exit = 1;
+                    break;
                 }
             }
-        } else if (exited_pid < 0 && errno != ECHILD) {
-            perror("waitpid");
-            break;
-        } else {
-            // Brief pause
-            for (volatile int i = 0; i < 10000; i++);
+        }
+        
+        // Check for user input (non-blocking)
+        fd_set readfds;
+        struct timeval timeout;
+        FD_ZERO(&readfds);
+        FD_SET(STDIN_FILENO, &readfds);
+        timeout.tv_sec = 0;
+        timeout.tv_usec = 100000; // 100ms timeout
+        
+        int ready = select(STDIN_FILENO + 1, &readfds, NULL, NULL, &timeout);
+        
+        if (ready > 0 && FD_ISSET(STDIN_FILENO, &readfds)) {
+            if (fgets(input, sizeof(input), stdin) != NULL) {
+                if (input[0] == 'q' || input[0] == 'Q') {
+                    should_exit = 1;
+                    break;
+                } else {
+                    // Any other input triggers stats display
+                    request_stats();
+                    wait_for_stats_display();
+                }
+            }
         }
     }
     
