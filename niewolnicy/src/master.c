@@ -69,33 +69,31 @@ static void setup_shared_memory(void) {
 }
 
 static void display_stats(void) {
-    pthread_mutex_lock(&stats->mutex);
-    
-    printf("\n=== Master Statistics ===\n");
+    // Simplified stats without mutex to test if that's the issue
+    printf("\n=== Master Statistics (DEBUG) ===\n");
     printf("Master PID: %d\n", getpid());
-    printf("\nSlave Status:\n");
     
-    int total_sent = 0, total_received = 0, active_count = 0;
+    if (stats == NULL) {
+        printf("ERROR: stats is NULL!\n");
+        return;
+    }
     
+    if (stats->magic != STATS_MAGIC) {
+        printf("ERROR: stats magic is wrong: 0x%x (expected 0x%x)\n", 
+               stats->magic, STATS_MAGIC);
+        return;
+    }
+    
+    printf("Stats memory looks OK\n");
+    printf("Active slaves: ");
     for (int i = 0; i < MAX_SLAVES; i++) {
         if (stats->active_slaves[i]) {
-            printf("  Slave %d: ACTIVE, sent=%d, received=%d\n", 
-                   i, stats->messages_sent[i], stats->messages_received[i]);
-            active_count++;
+            printf("%d ", i);
         }
-        total_sent += stats->messages_sent[i];
-        total_received += stats->messages_received[i];
     }
+    printf("\n========================\n");
     
-    if (active_count == 0) {
-        printf("  No active slaves\n");
-    }
-    
-    printf("\nTotals: %d active slaves, %d sent, %d received\n", 
-           active_count, total_sent, total_received);
-    printf("========================\n");
-    
-    pthread_mutex_unlock(&stats->mutex);
+    // DON'T use mutex for now - just test basic access
 }
 
 static void handle_register(const message_t *msg) {
