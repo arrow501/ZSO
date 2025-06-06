@@ -17,11 +17,7 @@ static int messages_processed = 0;
 static char slave_fifo[256];
 
 static void handle_signal(int sig) {
-    if (sig == SIGTERM || sig == SIGINT || sig == SIGQUIT) {
-        should_exit = 1;
-    } else if (sig == SIGUSR1) {
-        should_exit = 1;
-    }
+    should_exit = 1;
 }
 
 static void send_to_master(const message_t *msg) {

@@ -32,9 +32,6 @@ debug: clean all
 release: CFLAGS += -DENABLE_PRINTING=0 -DENABLE_ASSERTS=0 -O2 -DNDEBUG
 release: clean all
 
-# Testing (with shorter message limit)
-test: all
-	NUM_MESSAGES_PER_SLAVE=10 ./test.sh
 
 # Cleanup (only our files with full UUID)
 clean:
