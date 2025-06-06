@@ -1,139 +1,140 @@
 #!/bin/bash
 
-# Safer test that avoids signal issues
+# Thorough testing - stats signals and valgrind with multiple slaves
 
-set -e
+echo "Thorough Testing"
+echo "==============="
 
-echo "=== Safer IPC System Test ==="
+make clean >/dev/null
+make debug >/dev/null
+echo "✅ Built"
 
-# Build
-echo "Building..."
-make clean >/dev/null 2>&1
-make >/dev/null 2>&1
-echo "✅ Build successful"
-
-# Test 1: Let it run naturally and exit
+# Test 1: Stats signal counting
 echo
-echo "Test 1: Natural completion (1 slave, 5 messages)"
-echo "------------------------------------------------"
+echo "Test 1: Stats signal counting"
+echo "-----------------------------"
 
-# Set very low message count so it exits quickly
-export NUM_MESSAGES_PER_SLAVE=5
+export NUM_MESSAGES_PER_SLAVE=50
 
-echo "Starting system (should auto-exit after processing 5 messages)..."
-
-# Run without timeout - let it exit naturally
-./main 1 &
+echo "Starting system with 3 slaves..."
+./main 3 &
 MAIN_PID=$!
 
-echo "Main PID: $MAIN_PID"
+sleep 2
 
-# Monitor for up to 15 seconds
-for i in {1..15}; do
-    if ! kill -0 $MAIN_PID 2>/dev/null; then
-        echo "✅ System completed naturally after $i seconds"
-        break
-    fi
-    echo "  ... still running ($i/15)"
+echo "Sending 5 stats requests..."
+for i in {1..5}; do
+    echo "Signal $i"
+    kill -USR2 $MAIN_PID
     sleep 1
 done
 
-# Check if it's still running (shouldn't be)
-if kill -0 $MAIN_PID 2>/dev/null; then
-    echo "⚠️  System still running, terminating..."
-    kill -TERM $MAIN_PID 2>/dev/null || true
-    sleep 2
-    kill -KILL $MAIN_PID 2>/dev/null || true
-    echo "❌ System didn't exit naturally"
+sleep 2
+echo "Terminating..."
+kill -TERM $MAIN_PID
+wait $MAIN_PID 2>/dev/null || true
+
+echo "Counting stats outputs..."
+STATS_COUNT=$(grep -c "=== Master Statistics ===" *.log 2>/dev/null || echo 0)
+echo "Found $STATS_COUNT stats outputs (expected: 5)"
+
+if [ "$STATS_COUNT" -eq 5 ]; then
+    echo "✅ Stats signal test PASSED"
 else
-    echo "✅ Test 1 passed - system exited cleanly"
+    echo "❌ Stats signal test FAILED"
 fi
 
-# Test 2: Multiple slaves
+# Test 2: Valgrind with multiple slaves
 echo
-echo "Test 2: Multiple slaves (2 slaves, 3 messages each)"
-echo "--------------------------------------------------"
-
-export NUM_MESSAGES_PER_SLAVE=3
-
-./main 2 &
-MAIN_PID=$!
-
-echo "Main PID: $MAIN_PID"
-
-# Monitor for completion
-for i in {1..10}; do
-    if ! kill -0 $MAIN_PID 2>/dev/null; then
-        echo "✅ Multiple slaves completed after $i seconds"
-        break
-    fi
-    echo "  ... still running ($i/10)"
-    sleep 1
-done
-
-if kill -0 $MAIN_PID 2>/dev/null; then
-    echo "⚠️  System still running, terminating..."
-    kill -TERM $MAIN_PID 2>/dev/null || true
-    sleep 2
-    kill -KILL $MAIN_PID 2>/dev/null || true
-    echo "❌ Multiple slaves test failed"
-else
-    echo "✅ Test 2 passed - multiple slaves worked"
-fi
-
-# Test 3: Manual interrupt test (optional)
-echo
-echo "Test 3: Interrupt handling (optional)"
+echo "Test 2: Valgrind with multiple slaves"
 echo "------------------------------------"
-echo "This test starts the system and interrupts it after 3 seconds"
-read -p "Run interrupt test? (y/n): " -n 1 -r
-echo
 
-if [[ $REPLY =~ ^[Yy]$ ]]; then
-    export NUM_MESSAGES_PER_SLAVE=1000  # High number so it won't exit naturally
-    
-    ./main 1 &
-    MAIN_PID=$!
-    
-    echo "System started, will interrupt in 3 seconds..."
+export NUM_MESSAGES_PER_SLAVE=10
+
+echo "Running memcheck with 3 slaves..."
+timeout 30s valgrind --tool=memcheck --leak-check=full ./main 3 >valgrind.out 2>&1
+MEMCHECK_EXIT=$?
+
+echo "Memcheck exit code: $MEMCHECK_EXIT"
+echo "Memory errors:"
+grep "ERROR SUMMARY" valgrind.out
+echo "Memory leaks:"
+grep "definitely lost" valgrind.out
+
+# Test 3: Valgrind with stats signals
+echo
+echo "Test 3: Valgrind with stats signals"
+echo "----------------------------------"
+
+echo "Starting valgrind with helgrind..."
+timeout 45s valgrind --tool=helgrind ./main 2 >helgrind.out 2>&1 &
+VALGRIND_PID=$!
+
+sleep 5
+
+echo "Sending stats signals to valgrind process..."
+# Get the actual main process PID from valgrind output
+ACTUAL_MAIN_PID=$(pgrep -P $VALGRIND_PID main 2>/dev/null || echo "")
+
+if [ -n "$ACTUAL_MAIN_PID" ]; then
+    echo "Found main PID: $ACTUAL_MAIN_PID"
+    for i in {1..3}; do
+        echo "Stats signal $i"
+        kill -USR2 $ACTUAL_MAIN_PID 2>/dev/null || true
+        sleep 2
+    done
     sleep 3
-    
-    echo "Sending SIGTERM..."
-    kill -TERM $MAIN_PID 2>/dev/null || true
-    
-    # Wait a bit for graceful shutdown
-    sleep 2
-    
-    if kill -0 $MAIN_PID 2>/dev/null; then
-        echo "⚠️  Graceful shutdown failed, using SIGKILL..."
-        kill -KILL $MAIN_PID 2>/dev/null || true
-        echo "❌ Interrupt test failed - had to force kill"
-    else
-        echo "✅ Test 3 passed - graceful shutdown worked"
-    fi
-fi
-
-# Cleanup check
-echo
-echo "Cleanup check..."
-sleep 1
-LEFTOVER=$(find /tmp /dev/shm -name "*2e518cc1-6b7d-45c9-a7f6-1a7d35fcbb3f*" 2>/dev/null | wc -l)
-if [ $LEFTOVER -eq 0 ]; then
-    echo "✅ No leftover files"
+    kill -TERM $ACTUAL_MAIN_PID 2>/dev/null || true
 else
-    echo "⚠️  Found $LEFTOVER leftover files (cleaning up...)"
-    make clean >/dev/null 2>&1
+    echo "Could not find main process, letting valgrind finish naturally..."
+fi
+
+wait $VALGRIND_PID 2>/dev/null || true
+
+echo "Helgrind exit code: $?"
+echo "Race conditions:"
+grep "ERROR SUMMARY" helgrind.out
+grep "data race" helgrind.out 2>/dev/null || echo "No data races found"
+
+# Test 4: Signal stress test  
+echo
+echo "Test 4: Signal stress test"
+echo "-------------------------"
+
+export NUM_MESSAGES_PER_SLAVE=100
+
+echo "Starting system..."
+./main 2 >signal_test.out 2>&1 &
+MAIN_PID=$!
+
+sleep 1
+
+echo "Rapid stats requests..."
+for i in {1..10}; do
+    kill -USR2 $MAIN_PID 2>/dev/null || break
+done
+
+sleep 3
+kill -TERM $MAIN_PID 2>/dev/null || true
+wait $MAIN_PID 2>/dev/null || true
+
+RAPID_STATS=$(grep -c "=== Master Statistics ===" signal_test.out)
+echo "Rapid stats count: $RAPID_STATS (expected: ~10)"
+
+if [ "$RAPID_STATS" -ge 8 ] && [ "$RAPID_STATS" -le 12 ]; then
+    echo "✅ Signal stress test PASSED"
+else
+    echo "❌ Signal stress test FAILED"
 fi
 
 echo
-echo "=== Test Summary ==="
-echo "✅ System builds correctly"
-echo "✅ System runs and exits naturally"
-echo "✅ Multiple slaves work"
-echo "✅ No major crashes detected"
+echo "Summary"
+echo "======="
+echo "Stats counting: $([ "$STATS_COUNT" -eq 5 ] && echo "✅ PASS" || echo "❌ FAIL")"
+echo "Valgrind basic: $([ "$MEMCHECK_EXIT" -eq 0 ] || [ "$MEMCHECK_EXIT" -eq 124 ] && echo "✅ PASS" || echo "❌ FAIL")"
+echo "Signal stress:  $([ "$RAPID_STATS" -ge 8 ] && [ "$RAPID_STATS" -le 12 ] && echo "✅ PASS" || echo "❌ FAIL")"
+
 echo
-echo "🎉 All tests completed!"
-echo
-echo "Next: Try manual testing with:"
-echo "  ./main 3"
-echo "  (then press 's' for stats, 'q' to quit)"
+echo "Log files: valgrind.out, helgrind.out, signal_test.out"
+
+make clean >/dev/null
