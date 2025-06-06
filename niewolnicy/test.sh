@@ -19,7 +19,7 @@ echo "----------------------------------"
 ./main 2 > test1.log 2>&1 &
 PID=$!
 
-sleep 1  # Let it start
+sleep 0.1  # Let it start
 
 echo "Sending 10 signals with 0.1s delay..."
 for i in {1..10}; do
@@ -27,7 +27,7 @@ for i in {1..10}; do
     sleep 0.1
 done
 
-sleep 1
+sleep 0.1
 kill -TERM $PID 2>/dev/null || true
 wait $PID 2>/dev/null || true
 
