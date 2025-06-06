@@ -214,7 +214,6 @@ static void cleanup(void) {
         close(master_fd);
     }
     unlink(MASTER_FIFO);
-    unlink(MASTER_PID_FILE);
     
     // Cleanup shared memory
     if (stats != NULL) {
@@ -236,9 +235,6 @@ int main(void) {
     signal(SIGUSR1, handle_signal);
     signal(SIGPIPE, SIG_IGN);
     atexit(cleanup);
-    
-    // Write PID file FIRST
-    write_pid_file();
     
     // Setup IPC
     setup_shared_memory();
@@ -293,8 +289,8 @@ int main(void) {
         // 3. Send ONE query to ALL active slaves
         send_single_query_to_all_active_slaves();
         
-        // 4. Small delay to control query rate (this is the key!)
-        for (volatile int i = 0; i < 100000; i++);  // Increased delay
+        // 4. Configurable delay to control query rate
+        for (volatile int i = 0; i < QUERY_DELAY_CYCLES; i++);
     }
     
 #if ENABLE_PRINTING

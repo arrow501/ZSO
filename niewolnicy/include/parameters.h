@@ -32,6 +32,11 @@
 #define POLL_TIMEOUT_MS 100
 #endif
 
+/** Query delay cycles to control execution speed */
+#ifndef QUERY_DELAY_CYCLES
+#define QUERY_DELAY_CYCLES 1000000
+#endif
+
 /** System UUID for unique IPC resource names */
 //! Changing this UUID will break the tests and makefile !!!
 #ifndef SYSTEM_UUID

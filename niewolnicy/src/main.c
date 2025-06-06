@@ -48,9 +48,9 @@ static void cleanup_processes(void) {
 }
 
 static void wait_for_master_ready(void) {
-    // Simple polling wait for master to be ready
+    // Wait for master FIFO to exist instead of PID file
     for (int i = 0; i < 100; i++) {
-        if (file_exists(MASTER_PID_FILE)) {
+        if (file_exists(MASTER_FIFO)) {
             return;
         }
         // Small delay without using time functions
@@ -83,6 +83,7 @@ int main(int argc, char *argv[]) {
     signal(SIGINT, handle_signal);
     signal(SIGTERM, handle_signal);
     signal(SIGTSTP, handle_signal);  // Ctrl+Z for stats
+    signal(SIGUSR2, handle_signal);  // External signal forwarding for tests
     atexit(cleanup_processes);
     
 #if ENABLE_PRINTING
@@ -131,7 +132,7 @@ int main(int argc, char *argv[]) {
     }
     
     printf("Master-Slave IPC System running with %d slaves\n", num_slaves);
-    printf("Master PID: %d\n", master_pid);
+    printf("Master PID: %d (managed by main)\n", master_pid);
     printf("Press Ctrl+Z to display statistics, Ctrl+C to stop\n");
     
     // Main loop - just wait for processes to exit or signals

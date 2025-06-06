@@ -6,7 +6,6 @@ cleanup() {
     killall main master slave 2>/dev/null || true
     rm -f /tmp/master_fifo_2e518cc1-6b7d-45c9-a7f6-1a7d35fcbb3f 2>/dev/null || true
     rm -f /tmp/slave_fifo_2e518cc1-6b7d-45c9-a7f6-1a7d35fcbb3f_* 2>/dev/null || true
-    rm -f /tmp/master_pid_2e518cc1-6b7d-45c9-a7f6-1a7d35fcbb3f 2>/dev/null || true
     rm -f /dev/shm/master_stats_2e518cc1-6b7d-45c9-a7f6-1a7d35fcbb3f 2>/dev/null || true
 }
 
@@ -35,22 +34,15 @@ MAIN_PID=$!
 # Wait for system to start
 sleep 3
 
-# Get master PID
-MASTER_PID=$(cat /tmp/master_pid_2e518cc1-6b7d-45c9-a7f6-1a7d35fcbb3f 2>/dev/null)
-if [[ -z "$MASTER_PID" ]]; then
-    echo "❌ FAIL: No master PID found"
-    kill $MAIN_PID 2>/dev/null
-    exit 1
-fi
-
-echo "Master PID: $MASTER_PID"
+# No need to find master PID - we have main PID!
+echo "Main PID: $MAIN_PID (will forward signals to master)"
 echo ""
 
 # Test 1: Send 5 signals with delays (should definitely work)
 echo "Test 1: Sending 5 signals with 1 second delays..."
 for i in {1..5}; do
     echo "  Signal $i"
-    kill -USR1 $MASTER_PID 2>/dev/null
+    kill -USR2 $MAIN_PID 2>/dev/null  # Send SIGUSR2 to main
     sleep 1
 done
 
@@ -62,7 +54,7 @@ echo "Stats displays after test 1: $count1"
 echo ""
 echo "Test 2: Sending 5 rapid signals..."
 for i in {1..5}; do
-    kill -USR1 $MASTER_PID 2>/dev/null
+    kill -USR2 $MAIN_PID 2>/dev/null  # Send SIGUSR2 to main
 done
 
 sleep 3
@@ -74,7 +66,7 @@ echo "Total stats displays: $count2 (expected: $total_expected)"
 echo ""
 echo "Test 3: Sending 10 ultra-rapid signals..."
 for i in {1..10}; do
-    kill -USR1 $MASTER_PID 2>/dev/null
+    kill -USR2 $MAIN_PID 2>/dev/null  # Send SIGUSR2 to main
 done
 
 sleep 4
