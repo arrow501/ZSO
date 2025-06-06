@@ -19,9 +19,15 @@ static volatile sig_atomic_t stats_requests = 0;  // Simple atomic counter
 
 static void handle_signal(int sig) {
     if (sig == SIGINT || sig == SIGTERM) {
+#if ENABLE_PRINTING
+        printf("Master: Received exit signal %d\n", sig);
+#endif
         should_exit = 1;
     } else if (sig == SIGUSR1) {
         // Simply increment counter - atomic
+#if ENABLE_PRINTING
+        printf("Master: Received SIGUSR1, incrementing stats_requests\n");
+#endif
         stats_requests++;
     }
 }
@@ -248,10 +254,16 @@ int main(void) {
         // 1. Check for pending stats requests (simplified signal handling)
         sig_atomic_t pending_requests = stats_requests;
         if (pending_requests > 0) {
+#if ENABLE_PRINTING
+            printf("Master: Processing %d stats requests\n", (int)pending_requests);
+#endif
             for (sig_atomic_t i = 0; i < pending_requests; i++) {
                 display_stats();
             }
             stats_requests -= pending_requests;
+#if ENABLE_PRINTING
+            printf("Master: Finished processing stats requests\n");
+#endif
         }
         
         // 2. Check for messages from slaves (register/unregister/response)
