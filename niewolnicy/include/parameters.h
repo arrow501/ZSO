@@ -14,17 +14,17 @@
 
 /** Number of messages each slave should process before exiting */
 #ifndef NUM_MESSAGES_PER_SLAVE
-#define NUM_MESSAGES_PER_SLAVE 10
+#define NUM_MESSAGES_PER_SLAVE 1000
 #endif
 
 /** Controls debug output (1 = enabled, 0 = disabled) */
 #ifndef ENABLE_PRINTING
-#define ENABLE_PRINTING 1
+#define ENABLE_PRINTING 0
 #endif
 
 /** Controls assertions (1 = enabled, 0 = disabled) */
 #ifndef ENABLE_ASSERTS
-#define ENABLE_ASSERTS 1
+#define ENABLE_ASSERTS 0
 #endif
 
 /** Poll timeout in milliseconds for responsiveness */
