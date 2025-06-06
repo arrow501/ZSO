@@ -159,7 +159,7 @@ int main(int argc, char *argv[]) {
             break;
         }
         
-        // Small delay to prevent busy waiting
+        // Small delay
         for (volatile int i = 0; i < 1000; i++);
     }
     

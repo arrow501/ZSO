@@ -238,9 +238,9 @@ int main(void) {
     printf("Master: Started (PID=%d)\n", getpid());
 #endif
     
-    // SIMPLE main loop - following polecenie exactly
+    // SIMPLE main loop 
     while (!should_exit) {
-        // 1. Check for pending stats requests (simplified signal handling)
+        // 1. Check for pending stats requests 
         sig_atomic_t pending_requests = stats_requests;
         if (pending_requests > 0) {
             for (sig_atomic_t i = 0; i < pending_requests; i++) {

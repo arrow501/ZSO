@@ -27,11 +27,6 @@
 #define ENABLE_ASSERTS 0
 #endif
 
-/** Poll timeout in milliseconds for responsiveness */
-#ifndef POLL_TIMEOUT_MS
-#define POLL_TIMEOUT_MS 100
-#endif
-
 /** Query delay cycles to control execution speed */
 #ifndef QUERY_DELAY_CYCLES
 #define QUERY_DELAY_CYCLES 1000000

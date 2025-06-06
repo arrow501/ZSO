@@ -4,9 +4,6 @@ LDFLAGS = -pthread -lrt
 INCLUDES = -Iinclude
 SRCDIR = src
 
-# Follow parameters.h defaults by default
-# (no explicit flags = use what's in parameters.h)
-
 # Override parameters if provided
 ifdef NUM_SLAVES
     CFLAGS += -DNUM_SLAVES=$(NUM_SLAVES)
