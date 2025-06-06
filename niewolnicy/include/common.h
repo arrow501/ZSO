@@ -7,6 +7,7 @@
 #include <assert.h>
 #include <sys/stat.h>
 #include <stdio.h>
+#include <semaphore.h>
 
 // Assertion macro - only active when enabled
 #if ENABLE_ASSERTS
