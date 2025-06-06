@@ -3,6 +3,7 @@
 #include <string.h>
 #include <unistd.h>
 #include <sys/wait.h>
+#include <sys/select.h>
 #include <signal.h>
 #include <errno.h>
 #include "../include/common.h"
@@ -79,11 +80,11 @@ int main(int argc, char *argv[]) {
         slave_pids[i] = 0;
     }
     
-    // Setup signal handling
-    signal(SIGINT, handle_signal);    // Ctrl+C for stats (unusual but works)
+    // Setup signal handling - normal termination behavior
+    signal(SIGINT, handle_signal);    // Ctrl+C terminates (normal)
     signal(SIGTERM, handle_signal);   // Terminate 
-    signal(SIGQUIT, handle_signal);   // Ctrl+\ to terminate
-    signal(SIGUSR2, handle_signal);   // External signal forwarding for tests
+    signal(SIGQUIT, handle_signal);   // Ctrl+\ terminates (normal)
+    signal(SIGUSR2, handle_signal);   // External signal for tests
     atexit(cleanup_processes);
     
 #if ENABLE_PRINTING
@@ -98,8 +99,6 @@ int main(int argc, char *argv[]) {
     }
     
     if (master_pid == 0) {
-        // In master child: ignore SIGINT so only main handles it
-        signal(SIGINT, SIG_IGN);
         execl("./master", "master", NULL);
         perror("Failed to exec master");
         exit(1);
@@ -121,8 +120,6 @@ int main(int argc, char *argv[]) {
         }
         
         if (slave_pids[i] == 0) {
-            // In slave child: ignore SIGINT so only main handles it
-            signal(SIGINT, SIG_IGN);
             char slave_id_str[16];
             snprintf(slave_id_str, sizeof(slave_id_str), "%d", i);
             execl("./slave", "slave", slave_id_str, NULL);
@@ -137,9 +134,9 @@ int main(int argc, char *argv[]) {
     
     printf("Master-Slave IPC System running with %d slaves\n", num_slaves);
     printf("Master PID: %d (managed by main)\n", master_pid);
-    printf("Press Ctrl+C to display statistics, Ctrl+\\ to stop\n");
+    printf("Type 's' + Enter for stats, 'q' + Enter or Ctrl+C to quit\n");
     
-    // Main loop - just wait for processes to exit or signals
+    // Main loop - handle both child exits AND stdin input
     while (!should_exit) {
         // Check for child process exits
         int status;
@@ -180,8 +177,28 @@ int main(int argc, char *argv[]) {
             }
         }
         
-        // Small delay to prevent busy waiting
-        for (volatile int i = 0; i < 10000; i++);
+        // Check for keyboard input (non-blocking)
+        fd_set read_fds;
+        struct timeval timeout = {0, 10000}; // 10ms timeout
+        FD_ZERO(&read_fds);
+        FD_SET(STDIN_FILENO, &read_fds);
+        
+        if (select(STDIN_FILENO + 1, &read_fds, NULL, NULL, &timeout) > 0) {
+            char c;
+            if (read(STDIN_FILENO, &c, 1) == 1) {
+                if (c == 's' || c == 'S') {
+                    // Request stats
+                    if (master_pid > 0) {
+                        printf("Requesting stats...\n");
+                        kill(master_pid, SIGUSR1);
+                    }
+                } else if (c == 'q' || c == 'Q') {
+                    // Quit
+                    should_exit = 1;
+                    break;
+                }
+            }
+        }
     }
     
 #if ENABLE_PRINTING
