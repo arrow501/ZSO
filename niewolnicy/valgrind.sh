@@ -14,7 +14,7 @@ fi
 # Build debug version
 echo "Building..."
 make clean >/dev/null 2>&1
-make debug >/dev/null 2>&1
+make release >/dev/null 2>&1
 echo "✅ Built"
 
 # Very short test
