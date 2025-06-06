@@ -246,7 +246,7 @@ int main(void) {
             for (sig_atomic_t i = 0; i < pending_requests; i++) {
                 display_stats();
             }
-            stats_requests -= pending_requests;
+            stats_requests--;
         }
         
         // 2. Check for messages from slaves (register/unregister/response)
