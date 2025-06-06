@@ -270,26 +270,32 @@ int main(void) {
 #endif
     
     // Main loop
-    struct pollfd pfd = { .fd = master_fd, .events = POLLIN };
+    struct pollfd pfds[2] = {
+        { .fd = master_fd, .events = POLLIN },
+        { .fd = signal_pipe[0], .events = POLLIN }
+    };
     
     while (!should_exit) {
-        // Handle pending stats requests atomically
-        while (stats_signals_pending > 0) {
-            // Atomically decrement and handle one signal
-            sig_atomic_t current_pending = stats_signals_pending;
-            if (current_pending > 0) {
-                stats_signals_pending--;
-                signal_stats_ready();
-            }
-        }
+        // Poll for both messages and signals
+        int ret = poll(pfds, 2, POLL_TIMEOUT_MS);
         
-        // Poll for messages
-        int ret = poll(&pfd, 1, POLL_TIMEOUT_MS);
-        
-        if (ret > 0 && (pfd.revents & POLLIN)) {
+        // Handle IPC messages
+        if (ret > 0 && (pfds[0].revents & POLLIN)) {
             message_t msg;
             while (read(master_fd, &msg, sizeof(msg)) == sizeof(msg)) {
                 process_message(&msg);
+            }
+        }
+        
+        // Handle signal pipe - process ALL pending signals
+        if (ret > 0 && (pfds[1].revents & POLLIN)) {
+            char buffer[256];
+            ssize_t bytes_read = read(signal_pipe[0], buffer, sizeof(buffer));
+            if (bytes_read > 0) {
+                // Each byte = one signal, display stats for each
+                for (ssize_t i = 0; i < bytes_read; i++) {
+                    signal_stats_ready();
+                }
             }
         }
         
