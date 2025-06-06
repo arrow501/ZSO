@@ -27,101 +27,166 @@ run_test() {
     MAIN_PID=$!
     
     sleep 2
-    #!/bin/bash
-
-echo "=== IPC System Test ==="
-
-# Get number of slaves from environment or default
-NUM_SLAVES=${NUM_SLAVES:-3}
-
-# Cleanup function
-cleanup() {
-    echo "Cleaning up..."
-    killall main master slave stats_reader 2>/dev/null || true
-    sleep 1
     
-    # Clean up IPC resources
-    rm -f /tmp/master_fifo /tmp/slave_fifo_* /tmp/master_pid 2>/dev/null || true
-    rm -f /dev/shm/master_stats /dev/shm/sem.stats_ready 2>/dev/null || true
-}
-
-# Set trap for cleanup
-trap cleanup EXIT
-
-# Initial cleanup
-cleanup
-
-echo "Testing with $NUM_SLAVES slaves..."
-
-# Test 1: Basic functionality
-echo "Test 1: Starting main launcher..."
-timeout 10s ./main $NUM_SLAVES &
-MAIN_PID=$!
-
-sleep 2
-
-# Verify processes are running
-if ! pgrep master > /dev/null; then
-    echo "ERROR: Master not running"
-    exit 1
-fi
-
-SLAVE_COUNT=$(pgrep slave | wc -l)
-if [ "$SLAVE_COUNT" -ne "$NUM_SLAVES" ]; then
-    echo "ERROR: Expected $NUM_SLAVES slaves, found $SLAVE_COUNT"
-    exit 1
-fi
-
-echo "✓ All processes started successfully"
-
-# Test 2: Stats functionality
-echo "Test 2: Testing stats reader..."
-echo -e "\n\n" | timeout 5s ./stats_reader &
-READER_PID=$!
-
-sleep 1
-
-# Check if stats reader is working
-if ! kill -0 $READER_PID 2>/dev/null; then
-    echo "ERROR: Stats reader failed to start"
-    exit 1
-fi
-
-echo "✓ Stats reader working"
-
-# Test 3: Signal handling
-echo "Test 3: Testing signal handling..."
-
-# Find master PID and send SIGUSR1
-MASTER_PID=$(pgrep master)
-if [ -n "$MASTER_PID" ]; then
-    kill -USR1 $MASTER_PID
-    echo "✓ Sent SIGUSR1 to master"
-else
-    echo "ERROR: Could not find master PID"
-    exit 1
-fi
-
-sleep 2
-
-# Test 4: Graceful shutdown
-echo "Test 4: Testing graceful shutdown..."
-kill -TERM $MAIN_PID 2>/dev/null || true
-kill -TERM $READER_PID 2>/dev/null || true
-
-# Wait for processes to exit
-for i in {1..5}; do
-    if ! pgrep -f "main|master|slave" > /dev/null; then
-        echo "✓ All processes shut down gracefully"
-        break
+    # Verify processes are running
+    if ! kill -0 $MAIN_PID 2>/dev/null; then
+        echo "FAIL: Main process not running"
+        return 1
     fi
-    sleep 1
-done
-
-if pgrep -f "main|master|slave" > /dev/null; then
+    
+    if ! pgrep master > /dev/null; then
+        echo "FAIL: Master not running"
+        return 1
+    fi
+    
+    local slave_count=$(pgrep slave | wc -l)
+    if [ "$slave_count" -ne "$num_slaves" ]; then
+        echo "FAIL: Expected $num_slaves slaves, found $slave_count"
+        return 1
+    fi
+    
+    echo "✓ All processes started successfully"
+    
+    # Test signal handling
+    echo "Testing signal handling..."
+    for i in $(seq 1 3); do
+        kill -USR1 $MAIN_PID 2>/dev/null
+        sleep 0.5
+    done
+    echo "✓ Signal handling tested"
+    
+    # Let system run for specified duration
+    sleep $test_duration
+    
+    # Test rapid fire signals
+    echo "Testing rapid fire signals..."
+    for i in $(seq 1 5); do
+        kill -USR1 $MAIN_PID 2>/dev/null
+        sleep 0.1
+    done
+    echo "✓ Rapid fire signals tested"
+    
+    # Graceful shutdown
+    echo "Testing graceful shutdown..."
+    kill -TERM $MAIN_PID 2>/dev/null
+    
+    # Wait for processes to exit
+    for i in $(seq 1 10); do
+        if ! pgrep -f "main|master|slave" > /dev/null; then
+            echo "✓ All processes shut down gracefully"
+            return 0
+        fi
+        sleep 1
+    done
+    
     echo "WARNING: Some processes still running"
     killall -9 main master slave 2>/dev/null || true
+    return 1
+}
+
+# Test 1: Single slave
+run_test "Single Slave Test" 1 3
+TEST1_RESULT=$?
+
+sleep 2
+cleanup
+
+# Test 2: Multiple slaves
+run_test "Multiple Slaves Test" 3 3
+TEST2_RESULT=$?
+
+sleep 2
+cleanup
+
+# Test 3: Maximum slaves
+run_test "Maximum Slaves Test" 10 3
+TEST3_RESULT=$?
+
+sleep 2
+cleanup
+
+# Test 4: Stress test with signal handling
+echo ""
+echo "=== Stress Test with Signal Handling ==="
+./main 5 &
+MAIN_PID=$!
+sleep 3
+
+if kill -0 $MAIN_PID 2>/dev/null; then
+    echo "✓ Stress test setup complete"
+    
+    # Burst of signals
+    for burst in $(seq 1 3); do
+        echo "Signal burst $burst/3..."
+        for i in $(seq 1 10); do
+            kill -USR1 $MAIN_PID 2>/dev/null
+        done
+        sleep 1
+    done
+    
+    # Test slave termination
+    echo "Testing slave termination..."
+    killall -TERM slave 2>/dev/null
+    sleep 2
+    
+    # Final stats
+    kill -USR1 $MAIN_PID 2>/dev/null
+    sleep 1
+    
+    # Cleanup stress test
+    kill -TERM $MAIN_PID 2>/dev/null
+    sleep 2
+    
+    if ! pgrep -f "main|master|slave" > /dev/null; then
+        echo "✓ Stress test completed successfully"
+        TEST4_RESULT=0
+    else
+        echo "WARNING: Stress test processes still running"
+        killall -9 main master slave 2>/dev/null || true
+        TEST4_RESULT=1
+    fi
+else
+    echo "FAIL: Stress test setup failed"
+    TEST4_RESULT=1
 fi
 
-echo "=== Test Complete ==="
-echo "All tests passed!"
+# Test 5: Invalid parameters
+echo ""
+echo "=== Invalid Parameters Test ==="
+./main 2>/dev/null
+if [ $? -ne 0 ]; then
+    echo "✓ Correctly rejected missing parameters"
+    TEST5_RESULT=0
+else
+    echo "FAIL: Should have rejected missing parameters"
+    TEST5_RESULT=1
+fi
+
+./main 0 2>/dev/null
+if [ $? -ne 0 ]; then
+    echo "✓ Correctly rejected invalid slave count"
+else
+    echo "FAIL: Should have rejected invalid slave count"
+    TEST5_RESULT=1
+fi
+
+# Summary
+echo ""
+echo "=== Test Results Summary ==="
+echo "Single Slave Test:        $([ $TEST1_RESULT -eq 0 ] && echo "PASS" || echo "FAIL")"
+echo "Multiple Slaves Test:     $([ $TEST2_RESULT -eq 0 ] && echo "PASS" || echo "FAIL")"
+echo "Maximum Slaves Test:      $([ $TEST3_RESULT -eq 0 ] && echo "PASS" || echo "FAIL")"
+echo "Stress Test:              $([ $TEST4_RESULT -eq 0 ] && echo "PASS" || echo "FAIL")"
+echo "Invalid Parameters Test:  $([ $TEST5_RESULT -eq 0 ] && echo "PASS" || echo "FAIL")"
+
+TOTAL_PASSED=$((5 - TEST1_RESULT - TEST2_RESULT - TEST3_RESULT - TEST4_RESULT - TEST5_RESULT))
+echo ""
+echo "Tests passed: $TOTAL_PASSED/5"
+
+if [ $TOTAL_PASSED -eq 5 ]; then
+    echo "🎉 All tests passed!"
+    exit 0
+else
+    echo "❌ Some tests failed"
+    exit 1
+fi
