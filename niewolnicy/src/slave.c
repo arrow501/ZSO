@@ -17,10 +17,9 @@ static int messages_processed = 0;
 static char slave_fifo[256];
 
 static void handle_signal(int sig) {
-    if (sig == SIGTERM || sig == SIGQUIT) {  // Only handle termination signals
+    if (sig == SIGTERM || sig == SIGINT || sig == SIGQUIT) {
         should_exit = 1;
     } else if (sig == SIGUSR1) {
-        // Signal to slave causes it to notify master it's finishing
         should_exit = 1;
     }
 }
@@ -102,10 +101,11 @@ int main(int argc, char *argv[]) {
         return 1;
     }
     
-    // Setup signal handling - SIGINT is ignored (set by main before exec)
+    // Setup signal handling
     signal(SIGTERM, handle_signal);
+    signal(SIGINT, handle_signal);
     signal(SIGQUIT, handle_signal);
-    signal(SIGUSR1, handle_signal);  // Signal to slave → notify master finishing
+    signal(SIGUSR1, handle_signal);
     signal(SIGPIPE, SIG_IGN);
     atexit(cleanup);
     

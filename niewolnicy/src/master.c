@@ -18,13 +18,9 @@ static volatile sig_atomic_t should_exit = 0;
 static volatile sig_atomic_t stats_requests = 0;  // Simple atomic counter
 
 static void handle_signal(int sig) {
-    if (sig == SIGINT || sig == SIGTERM) {
+    if (sig == SIGINT || sig == SIGTERM || sig == SIGQUIT) {
         should_exit = 1;
     } else if (sig == SIGUSR1) {
-        // Simply increment counter - atomic
-#if ENABLE_PRINTING
-        printf("Master: Received SIGUSR1, incrementing stats_requests\n");
-#endif
         stats_requests++;
     }
 }
@@ -184,10 +180,6 @@ static void send_single_query_to_all_active_slaves(void) {
             pthread_mutex_unlock(&stats->mutex);
         }
     }
-    
-#if ENABLE_PRINTING
-    printf("Master: Sent query %d to active slaves\n", query_counter);
-#endif
 }
 
 static void cleanup(void) {
@@ -218,7 +210,8 @@ int main(void) {
         slave_fds[i] = -1;
     }
     
-    // Setup signals - SIGINT is ignored (set by main before exec)
+    // Setup signals
+    signal(SIGINT, handle_signal);
     signal(SIGTERM, handle_signal);
     signal(SIGQUIT, handle_signal);
     signal(SIGUSR1, handle_signal);
@@ -243,7 +236,6 @@ int main(void) {
     
 #if ENABLE_PRINTING
     printf("Master: Started (PID=%d)\n", getpid());
-    printf("Master: Send SIGUSR1 to display stats\n");
 #endif
     
     // SIMPLE main loop - following polecenie exactly

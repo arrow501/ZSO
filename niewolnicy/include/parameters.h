@@ -34,7 +34,7 @@
 
 /** Query delay cycles to control execution speed */
 #ifndef QUERY_DELAY_CYCLES
-#define QUERY_DELAY_CYCLES 100000000
+#define QUERY_DELAY_CYCLES 1000000
 #endif
 
 /** System UUID for unique IPC resource names */

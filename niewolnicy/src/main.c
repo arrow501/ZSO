@@ -15,17 +15,21 @@ static int num_slaves = 0;
 static volatile sig_atomic_t should_exit = 0;
 
 static void handle_signal(int sig) {
-    if (sig == SIGINT || sig == SIGTERM) {
+    if (sig == SIGINT || sig == SIGTERM || sig == SIGQUIT) {
         should_exit = 1;
         
         // Forward signal to all children
         if (master_pid > 0) {
-            kill(master_pid, sig);
+            kill(master_pid, SIGTERM);
         }
         for (int i = 0; i < num_slaves; i++) {
             if (slave_pids[i] > 0) {
-                kill(slave_pids[i], sig);
+                kill(slave_pids[i], SIGTERM);
             }
+        }
+    } else if (sig == SIGUSR2) {  // For automated tests
+        if (master_pid > 0) {
+            kill(master_pid, SIGUSR1);
         }
     }
 }
@@ -80,11 +84,11 @@ int main(int argc, char *argv[]) {
         slave_pids[i] = 0;
     }
     
-    // Setup signal handling - normal termination behavior
-    signal(SIGINT, handle_signal);    // Ctrl+C terminates (normal)
+    // Setup signal handling
+    signal(SIGINT, handle_signal);    // Ctrl+C terminates
     signal(SIGTERM, handle_signal);   // Terminate 
-    signal(SIGQUIT, handle_signal);   // Ctrl+\ terminates (normal)
-    signal(SIGUSR2, handle_signal);   // External signal for tests
+    signal(SIGQUIT, handle_signal);   // Ctrl+\ terminates
+    signal(SIGUSR2, handle_signal);   // For automated tests
     atexit(cleanup_processes);
     
 #if ENABLE_PRINTING
@@ -133,7 +137,7 @@ int main(int argc, char *argv[]) {
     }
     
     printf("Master-Slave IPC System running with %d slaves\n", num_slaves);
-    printf("Master PID: %d (managed by main)\n", master_pid);
+    printf("Master PID: %d\n", master_pid);
     printf("Type 's' + Enter for stats, 'q' + Enter or Ctrl+C to quit\n");
     
     // Main loop - handle both child exits AND stdin input
