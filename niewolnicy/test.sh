@@ -27,7 +27,7 @@ for i in {1..10}; do
     sleep 0.1
 done
 
-sleep 0.1
+sleep 1
 kill -TERM $PID 2>/dev/null || true
 wait $PID 2>/dev/null || true
 
@@ -42,7 +42,7 @@ echo "----------------------------------"
 ./main 2 > test2.log 2>&1 &
 PID=$!
 
-sleep 1  # Let it start
+sleep 0.1  # Let it start
 
 echo "Sending 10 rapid signals..."
 for i in {1..10}; do
