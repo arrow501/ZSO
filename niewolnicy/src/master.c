@@ -2,23 +2,21 @@
 #include <stdlib.h>
 #include <string.h>
 #include <unistd.h>
-#include <sys/wait.h>
+#include <fcntl.h>
 #include <signal.h>
-#include <errno.h>
+#include <sys/stat.h>
 #include <sys/mman.h>
+#include <errno.h>
+#include <poll.h>
 #include <semaphore.h>
 #include <pthread.h>
-#include <fcntl.h>
-#include <poll.h>
 #include "../include/common.h"
-
 
 // Global state
 static int master_fd = -1;
 static int slave_fds[NUM_SLAVES];
 static stats_t *stats = NULL;
 static sem_t *stats_sem = NULL;
-static sem_t *stats_init_sem = NULL;
 static volatile sig_atomic_t should_exit = 0;
 static volatile sig_atomic_t stats_signals_pending = 0;
 
@@ -42,7 +40,6 @@ static void write_pid_file(void) {
 }
 
 static int setup_shared_memory(void) {
-    // Clean up any existing shared memory
     shm_unlink(SHM_NAME);
     
     int shm_fd = shm_open(SHM_NAME, O_CREAT | O_RDWR | O_EXCL, 0666);
@@ -54,38 +51,27 @@ static int setup_shared_memory(void) {
     close(shm_fd);
     DEBUG_ASSERT(stats != MAP_FAILED, "Should map shared memory");
     
-    // Initialize process-shared mutex
+    // Simple mutex initialization
     pthread_mutexattr_t attr;
     pthread_mutexattr_init(&attr);
     pthread_mutexattr_setpshared(&attr, PTHREAD_PROCESS_SHARED);
     DEBUG_ASSERT(pthread_mutex_init(&stats->mutex, &attr) == 0, "Should init mutex");
     pthread_mutexattr_destroy(&attr);
     
-    // Initialize stats with mutex protection
-    pthread_mutex_lock(&stats->mutex);
+    // Initialize stats
     stats->master_pid = getpid();
     memset(stats->messages_sent, 0, sizeof(stats->messages_sent));
     memset(stats->messages_received, 0, sizeof(stats->messages_received));
     memset(stats->active_slaves, 0, sizeof(stats->active_slaves));
     stats->magic = STATS_MAGIC;
-    pthread_mutex_unlock(&stats->mutex);
     
     return 0;
 }
 
 static int setup_semaphore(void) {
-    // Clean up old semaphores
     sem_unlink(SEM_NAME);
-    sem_unlink(SEM_INIT_NAME);
-    
-    // Create stats ready semaphore
     stats_sem = sem_open(SEM_NAME, O_CREAT | O_EXCL, 0666, 0);
     DEBUG_ASSERT(stats_sem != SEM_FAILED, "Should create stats semaphore");
-    
-    // Create initialization semaphore (starts at 0 - blocks until we signal)
-    stats_init_sem = sem_open(SEM_INIT_NAME, O_CREAT | O_EXCL, 0666, 0);
-    DEBUG_ASSERT(stats_init_sem != SEM_FAILED, "Should create init semaphore");
-    
     return 0;
 }
 
@@ -194,9 +180,28 @@ static void send_queries(void) {
 static void signal_stats_ready(void) {
     DEBUG_ASSERT(sem_post(stats_sem) == 0, "Should signal stats ready");
     
-#if ENABLE_PRINTING
-    printf("Master: Stats updated in shared memory\n");
-#endif
+    // Also display stats directly in master (simplified)
+    printf("\n=== Master Statistics ===\n");
+    printf("Master PID: %d\n", getpid());
+    
+    int total_sent = 0, total_received = 0, active_count = 0;
+    
+    printf("\nSlave Status:\n");
+    for (int i = 0; i < NUM_SLAVES; i++) {
+        if (stats->active_slaves[i]) {
+            printf("  Slave %d: ACTIVE, sent=%d, received=%d\n", 
+                   i, stats->messages_sent[i], stats->messages_received[i]);
+            active_count++;
+        } else {
+            printf("  Slave %d: INACTIVE\n", i);
+        }
+        total_sent += stats->messages_sent[i];
+        total_received += stats->messages_received[i];
+    }
+    
+    printf("\nTotals: %d active slaves, %d sent, %d received\n", 
+           active_count, total_sent, total_received);
+    printf("========================\n");
 }
 
 static void cleanup(void) {
@@ -226,11 +231,6 @@ static void cleanup(void) {
         sem_close(stats_sem);
     }
     sem_unlink(SEM_NAME);
-    
-    if (stats_init_sem != NULL) {
-        sem_close(stats_init_sem);
-    }
-    sem_unlink(SEM_INIT_NAME);
 }
 
 int main(void) {
@@ -253,9 +253,6 @@ int main(void) {
     // Setup IPC
     DEBUG_ASSERT(setup_shared_memory() == 0, "Should setup shared memory");
     DEBUG_ASSERT(setup_semaphore() == 0, "Should setup semaphore");
-    
-    // Signal that shared memory is fully initialized and ready
-    DEBUG_ASSERT(sem_post(stats_init_sem) == 0, "Should signal initialization complete");
     
     // Create master FIFO
     unlink(MASTER_FIFO);

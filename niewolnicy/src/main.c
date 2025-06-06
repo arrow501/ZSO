@@ -7,170 +7,46 @@
 #include <errno.h>
 #include <sys/mman.h>
 #include <semaphore.h>
-#include <poll.h>
 #include <pthread.h>
+#include <fcntl.h>
 #include "../include/common.h"
 
-// Global state for cleanup
+// Global state
 static pid_t master_pid = 0;
 static pid_t slave_pids[NUM_SLAVES];
 static int num_slaves_started = 0;
 static volatile sig_atomic_t should_exit = 0;
-static stats_t *stats = NULL;
-static sem_t *stats_sem = NULL;
-
-// Inline stats functions (absorbed from stats_reader.c)
-static void display_stats(const stats_t *stats) {
-    DEBUG_ASSERT(stats != NULL, "Stats should not be NULL");
-    
-    printf("\n=== Master Statistics ===\n");
-    printf("Master PID: %d\n", stats->master_pid);
-    
-    int total_sent = 0, total_received = 0, active_count = 0;
-    
-    printf("\nSlave Status:\n");
-    for (int i = 0; i < NUM_SLAVES; i++) {
-        if (stats->active_slaves[i]) {
-            printf("  Slave %d: ACTIVE, sent=%d, received=%d\n", 
-                   i, stats->messages_sent[i], stats->messages_received[i]);
-            active_count++;
-        } else {
-            printf("  Slave %d: INACTIVE\n", i);
-        }
-        total_sent += stats->messages_sent[i];
-        total_received += stats->messages_received[i];
-    }
-    
-    printf("\nTotals: %d active slaves, %d sent, %d received\n", 
-           active_count, total_sent, total_received);
-    printf("========================\n");
-}
-
-static void wait_and_display_stats(stats_t *stats, sem_t *sem) {
-    // Simple blocking wait without timeout
-    int ret = sem_wait(sem);
-    
-    if (ret == 0) {
-        pthread_mutex_lock(&stats->mutex);
-        display_stats(stats);
-        pthread_mutex_unlock(&stats->mutex);
-    } else {
-        perror("sem_wait");
-    }
-}
-
-static int setup_stats_monitoring(pid_t master_pid, stats_t **stats_ptr, sem_t **sem_ptr) {
-    // Shared memory should already be initialized by this point
-    int shm_fd = shm_open(SHM_NAME, O_RDWR, 0666);
-    if (shm_fd < 0) {
-        perror("shm_open");
-        return -1;
-    }
-    
-    *stats_ptr = mmap(NULL, sizeof(stats_t), PROT_READ | PROT_WRITE, MAP_SHARED, shm_fd, 0);
-    close(shm_fd);
-    
-    if (*stats_ptr == MAP_FAILED) {
-        perror("mmap");
-        return -1;
-    }
-    
-    // Safely check magic with mutex protection
-    pthread_mutex_lock(&(*stats_ptr)->mutex);
-    DEBUG_ASSERT((*stats_ptr)->magic == STATS_MAGIC, "Stats should be initialized");
-    pthread_mutex_unlock(&(*stats_ptr)->mutex);
-    
-    // Open semaphore
-    *sem_ptr = sem_open(SEM_NAME, 0);
-    if (*sem_ptr == SEM_FAILED) {
-        perror("sem_open");
-        munmap(*stats_ptr, sizeof(stats_t));
-        return -1;
-    }
-    
-    printf("Stats monitoring setup for master PID %d\n", master_pid);
-    return 0;
-}
-
-static int trigger_and_display_stats(pid_t master_pid, stats_t *stats, sem_t *sem) {
-    if (kill(master_pid, SIGUSR1) != 0) {
-        perror("Failed to send signal to master");
-        return -1;
-    }
-    
-    printf("Stats request sent to master (PID %d)\n", master_pid);
-    wait_and_display_stats(stats, sem);
-    return 0;
-}
 
 static void handle_signal(int sig) {
     if (sig == SIGINT || sig == SIGTERM) {
         should_exit = 1;
     } else if (sig == SIGUSR1) {
-        // Trigger stats display
-        if (master_pid > 0 && stats != NULL && stats_sem != NULL) {
-            trigger_and_display_stats(master_pid, stats, stats_sem);
+        // Simple stats trigger - just forward to master
+        if (master_pid > 0) {
+            kill(master_pid, SIGUSR1);
         }
     }
-    // Avoid unused parameter warning by using sig
-    (void)sig;
 }
 
 static void cleanup_processes(void) {
     printf("Main: Cleaning up processes...\n");
     
-    // Terminate slaves first
     for (int i = 0; i < num_slaves_started; i++) {
         if (slave_pids[i] > 0) {
             kill(slave_pids[i], SIGTERM);
         }
     }
     
-    // Terminate master
     if (master_pid > 0) {
         kill(master_pid, SIGTERM);
     }
     
-    // Wait for all children
     int status;
     while (wait(&status) > 0) {
         // Reap children
     }
     
-    // Cleanup stats monitoring
-    if (stats_sem != NULL) {
-        sem_close(stats_sem);
-    }
-    if (stats != NULL) {
-        munmap(stats, sizeof(stats_t));
-    }
-    
     printf("Main: All processes terminated\n");
-}
-
-static int wait_for_shared_memory_ready(void) {
-    // Wait for master to create initialization semaphore
-    sem_t *init_sem = NULL;
-    
-    for (int i = 0; i < 1000; i++) {
-        init_sem = sem_open(SEM_INIT_NAME, 0);
-        if (init_sem != SEM_FAILED) {
-            // Semaphore exists, now wait for master to signal initialization complete
-            if (sem_wait(init_sem) == 0) {
-                sem_close(init_sem);
-                return 0;
-            } else {
-                perror("sem_wait for initialization");
-                sem_close(init_sem);
-                return -1;
-            }
-        }
-        // Brief CPU pause without time dependency
-        for (volatile int j = 0; j < 10000; j++);
-    }
-    
-    printf("Main: Timeout waiting for master to create initialization semaphore\n");
-    return -1;
 }
 
 static void show_help(const char *program_name) {
@@ -181,7 +57,6 @@ static void show_help(const char *program_name) {
 int main(int argc, char *argv[]) {
     int num_slaves;
     
-    // Parse command line arguments
     if (argc != 2) {
         show_help(argv[0]);
         return 1;
@@ -194,22 +69,18 @@ int main(int argc, char *argv[]) {
         return 1;
     }
     
-    // Initialize arrays
     for (int i = 0; i < NUM_SLAVES; i++) {
         slave_pids[i] = 0;
     }
     
-    // Setup signal handling
     signal(SIGINT, handle_signal);
     signal(SIGTERM, handle_signal);
     signal(SIGUSR1, handle_signal);
-    
-    // Register cleanup function
     atexit(cleanup_processes);
     
     printf("Main: Starting IPC system with %d slaves\n", num_slaves);
     
-    // Start master process
+    // Start master
     master_pid = fork();
     DEBUG_ASSERT(master_pid >= 0, "Should fork master successfully");
     
@@ -221,19 +92,13 @@ int main(int argc, char *argv[]) {
     
     printf("Main: Master started (PID=%d)\n", master_pid);
     
-    // Wait for master to be ready (shared memory fully initialized)
-    if (wait_for_shared_memory_ready() < 0) {
-        printf("Main: Master failed to initialize shared memory\n");
-        return 1;
+    // Simple wait for master to be ready
+    for (int i = 0; i < 100; i++) {
+        if (file_exists(MASTER_PID_FILE)) break;
+        for (volatile int j = 0; j < 50000; j++);
     }
     
-    // Setup stats monitoring - shared memory is now guaranteed to be ready
-    if (setup_stats_monitoring(master_pid, &stats, &stats_sem) < 0) {
-        printf("Main: Failed to setup stats monitoring\n");
-        return 1;
-    }
-    
-    // Start slave processes
+    // Start slaves
     for (int i = 0; i < num_slaves; i++) {
         slave_pids[i] = fork();
         DEBUG_ASSERT(slave_pids[i] >= 0, "Should fork slave successfully");
@@ -254,7 +119,7 @@ int main(int argc, char *argv[]) {
     printf("Main: Send SIGUSR1 to this process (PID=%d) to display stats\n", getpid());
     printf("Main: Press Ctrl+C to stop all processes\n");
     
-    // Main monitoring loop (no time-based logic)
+    // Simple monitoring loop
     while (!should_exit) {
         int status;
         pid_t exited_pid = waitpid(-1, &status, WNOHANG);
@@ -265,7 +130,6 @@ int main(int argc, char *argv[]) {
                 master_pid = 0;
                 should_exit = 1;
             } else {
-                // Find which slave exited
                 for (int i = 0; i < num_slaves; i++) {
                     if (slave_pids[i] == exited_pid) {
                         printf("Main: Slave %d exited\n", i);
@@ -274,7 +138,6 @@ int main(int argc, char *argv[]) {
                     }
                 }
                 
-                // Check if all slaves have exited
                 int slaves_alive = 0;
                 for (int i = 0; i < num_slaves; i++) {
                     if (slave_pids[i] > 0) slaves_alive++;
@@ -289,7 +152,6 @@ int main(int argc, char *argv[]) {
             perror("waitpid");
             break;
         } else {
-            // No children exited, brief CPU pause
             for (volatile int i = 0; i < 10000; i++);
         }
     }

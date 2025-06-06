@@ -53,6 +53,6 @@ test: debug
 clean:
 	rm -f master slave main
 	rm -f /tmp/master_fifo_* /tmp/slave_fifo_* /tmp/master_pid_*
-	rm -f /dev/shm/master_stats_* /dev/shm/sem.stats_ready_* /dev/shm/sem.stats_init_*
+	rm -f /dev/shm/master_stats_* /dev/shm/sem.stats_ready_*
 
 .PHONY: all clean debug release small large test

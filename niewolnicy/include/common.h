@@ -28,7 +28,6 @@
 #define MASTER_PID_FILE "/tmp/master_pid_" SYSTEM_UUID
 #define SHM_NAME "/master_stats_" SYSTEM_UUID  
 #define SEM_NAME "/stats_ready_" SYSTEM_UUID
-#define SEM_INIT_NAME "/stats_init_" SYSTEM_UUID
 
 // Message types
 typedef enum {
