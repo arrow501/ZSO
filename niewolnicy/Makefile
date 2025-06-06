@@ -38,10 +38,13 @@ release: clean all
 test: all
 	./test.sh
 
-# Cleanup
+# Cleanup (only our files with full UUID)
 clean:
 	rm -f master slave main
-	rm -f /tmp/master_fifo_* /tmp/slave_fifo_* /tmp/master_pid_*
-	rm -f /dev/shm/master_stats_* /dev/shm/sem.stats_ready_* /dev/shm/sem.stats_init_*
+	rm -f /tmp/master_fifo_2e518cc1-6b7d-45c9-a7f6-1a7d35fcbb3f 2>/dev/null || true
+	rm -f /tmp/slave_fifo_2e518cc1-6b7d-45c9-a7f6-1a7d35fcbb3f_* 2>/dev/null || true
+	rm -f /tmp/master_pid_2e518cc1-6b7d-45c9-a7f6-1a7d35fcbb3f 2>/dev/null || true
+	rm -f /dev/shm/master_stats_2e518cc1-6b7d-45c9-a7f6-1a7d35fcbb3f 2>/dev/null || true
+	rm -f /dev/shm/sem.stats_ready_2e518cc1-6b7d-45c9-a7f6-1a7d35fcbb3f 2>/dev/null || true
 
 .PHONY: all clean debug release test

@@ -33,6 +33,7 @@
 #endif
 
 /** System UUID for unique IPC resource names */
+//! Changing this UUID will break the tests !!!
 #ifndef SYSTEM_UUID
 #define SYSTEM_UUID "2e518cc1-6b7d-45c9-a7f6-1a7d35fcbb3f"
 #endif

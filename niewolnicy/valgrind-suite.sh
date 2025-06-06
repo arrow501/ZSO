@@ -11,11 +11,7 @@ TEST_DURATION=6
 mkdir -p "$LOGS_DIR"
 
 cleanup() {
-    # Kill only our test processes, not the valgrind script itself
-    pkill -f "valgrind.*main" 2>/dev/null || true
-    pkill -f "^main " 2>/dev/null || true
-    pkill -f "^master$" 2>/dev/null || true
-    pkill -f "^slave " 2>/dev/null || true
+    pkill -f "main|master|slave|valgrind" 2>/dev/null || true
     sleep 1
     rm -f /tmp/master_fifo_* /tmp/slave_fifo_* /tmp/master_pid_* 2>/dev/null || true
     rm -f /dev/shm/master_stats_* /dev/shm/sem.stats_ready_* 2>/dev/null || true
@@ -54,10 +50,8 @@ test_memcheck() {
     done
     
     # Graceful shutdown
-    kill -TERM $MAIN_PID 2>/dev/null || true
-    
-    # Wait for valgrind to finish properly
-    wait $MAIN_PID 2>/dev/null || true
+    kill -TERM $MAIN_PID 2>/dev/null
+    wait $MAIN_PID 2>/dev/null
     
     echo "✓ Memcheck complete"
 }
@@ -79,8 +73,8 @@ test_helgrind() {
         sleep 0.2
     done
     
-    kill -TERM $MAIN_PID 2>/dev/null || true
-    wait $MAIN_PID 2>/dev/null || true
+    kill -TERM $MAIN_PID 2>/dev/null
+    wait $MAIN_PID 2>/dev/null
     
     echo "✓ Helgrind complete"
 }
@@ -100,12 +94,13 @@ test_drd() {
     for burst in {1..3}; do
         for i in {1..3}; do
             kill -USR1 $MAIN_PID 2>/dev/null || true
+            sleep 0.1
         done
         sleep 0.5
     done
     
-    kill -TERM $MAIN_PID 2>/dev/null || true
-    wait $MAIN_PID 2>/dev/null || true
+    kill -TERM $MAIN_PID 2>/dev/null
+    wait $MAIN_PID 2>/dev/null
     
     echo "✓ DRD complete"
 }
