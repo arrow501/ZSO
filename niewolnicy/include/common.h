@@ -1,18 +1,15 @@
 #ifndef COMMON_H
 #define COMMON_H
 
+#include "parameters.h"
 #include <stdint.h>
 #include <pthread.h>
 #include <assert.h>
 #include <sys/stat.h>
+#include <stdio.h>
 
-// Debug mode configuration
-#ifndef DEBUG
-#define DEBUG 1  // Set to 0 to disable debug assertions
-#endif
-
-// Debug assertion macro - only active in debug builds
-#if DEBUG
+// Assertion macro - only active when enabled
+#if ENABLE_ASSERTS
     #define DEBUG_ASSERT(cond, msg) \
         do { \
             if (!(cond)) { \
@@ -25,14 +22,10 @@
     #define DEBUG_ASSERT(cond, msg) ((void)0)
 #endif
 
-// System configuration
-#define MAX_SLAVES 10
-#define POLL_TIMEOUT_MS 100
-#define QUERY_INTERVAL_MS 1000
-
-// IPC paths
+// System paths
 #define MASTER_FIFO "/tmp/master_fifo"
 #define SLAVE_FIFO_PREFIX "/tmp/slave_fifo_"
+#define MASTER_PID_FILE "/tmp/master_pid"
 #define SHM_NAME "/master_stats"
 #define SEM_NAME "/stats_ready"
 
@@ -44,26 +37,26 @@ typedef enum {
     MSG_RESPONSE = 4
 } message_type_t;
 
-// Message structure for IPC
+// Message structure
 typedef struct {
     message_type_t type;
     int slave_id;
-    int payload;  // PID for register, value for query/response
+    int payload;
 } message_t;
 
-// Statistics structure in shared memory
+// Statistics in shared memory
 typedef struct {
-    pthread_mutex_t mutex;  // Mutex must be first for alignment
-    int messages_sent[MAX_SLAVES];
-    int messages_received[MAX_SLAVES];
-    int slave_pids[MAX_SLAVES];
-    int active_slaves[MAX_SLAVES];
-    int magic;  // Magic number to verify initialization
+    pthread_mutex_t mutex;
+    pid_t master_pid;
+    int messages_sent[NUM_SLAVES];
+    int messages_received[NUM_SLAVES];
+    int active_slaves[NUM_SLAVES];
+    int magic;
 } stats_t;
 
-#define STATS_MAGIC ((int)0xDEADBEEF)
+#define STATS_MAGIC 0xDEADBEEF
 
-// Helper function to check if file exists
+// Helper function
 static inline int file_exists(const char *path) {
     struct stat st;
     return stat(path, &st) == 0;

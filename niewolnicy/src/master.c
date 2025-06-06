@@ -6,213 +6,124 @@
 #include <signal.h>
 #include <sys/stat.h>
 #include <sys/mman.h>
-#include <sys/time.h>
 #include <errno.h>
 #include <poll.h>
 #include <semaphore.h>
 #include <pthread.h>
 #include "../include/common.h"
 
-// Slave information
-typedef struct {
-    int pid;
-    int fd;
-    int active;
-} slave_info_t;
-
 // Global state
-static slave_info_t slaves[MAX_SLAVES];
 static int master_fd = -1;
+static int slave_fds[NUM_SLAVES];
 static stats_t *stats = NULL;
-static sem_t *stats_ready_sem = NULL;
+static sem_t *stats_sem = NULL;
 static volatile sig_atomic_t should_exit = 0;
-static volatile sig_atomic_t dump_stats = 0;
+static volatile sig_atomic_t stats_requested = 0;
 
-// === Signal Handling ===
 static void handle_signal(int sig) {
     if (sig == SIGINT || sig == SIGTERM) {
         should_exit = 1;
     } else if (sig == SIGUSR1) {
-        dump_stats = 1;
+        stats_requested = 1;
     }
 }
 
-// === Shared Memory Management ===
+static void write_pid_file(void) {
+    FILE *f = fopen(MASTER_PID_FILE, "w");
+    DEBUG_ASSERT(f != NULL, "Should be able to create PID file");
+    fprintf(f, "%d\n", getpid());
+    fclose(f);
+    
+#if ENABLE_PRINTING
+    printf("Master PID %d written to %s\n", getpid(), MASTER_PID_FILE);
+#endif
+}
+
 static int setup_shared_memory(void) {
     // Clean up any existing shared memory
     shm_unlink(SHM_NAME);
     
-    // Verify it's gone
-    int shm_test = shm_open(SHM_NAME, O_RDONLY, 0666);
-    if (shm_test >= 0) {
-        close(shm_test);
-        DEBUG_ASSERT(0, "Shared memory should not exist after unlink");
-    }
-    
-    // Create shared memory object
     int shm_fd = shm_open(SHM_NAME, O_CREAT | O_RDWR | O_EXCL, 0666);
-    if (shm_fd < 0) {
-        perror("shm_open");
-        return -1;
-    }
+    DEBUG_ASSERT(shm_fd >= 0, "Should create shared memory");
     
-    DEBUG_ASSERT(shm_fd >= 0, "Shared memory fd should be valid");
+    DEBUG_ASSERT(ftruncate(shm_fd, sizeof(stats_t)) == 0, "Should set shm size");
     
-    // Set size of shared memory
-    if (ftruncate(shm_fd, sizeof(stats_t)) < 0) {
-        perror("ftruncate");
-        close(shm_fd);
-        shm_unlink(SHM_NAME);
-        return -1;
-    }
+    stats = mmap(NULL, sizeof(stats_t), PROT_READ | PROT_WRITE, MAP_SHARED, shm_fd, 0);
+    close(shm_fd);
+    DEBUG_ASSERT(stats != MAP_FAILED, "Should map shared memory");
     
-    // Map shared memory
-    stats = mmap(NULL, sizeof(stats_t), PROT_READ | PROT_WRITE,
-                 MAP_SHARED, shm_fd, 0);
-    close(shm_fd);  // Can close fd after mmap
+    // Initialize process-shared mutex
+    pthread_mutexattr_t attr;
+    pthread_mutexattr_init(&attr);
+    pthread_mutexattr_setpshared(&attr, PTHREAD_PROCESS_SHARED);
+    DEBUG_ASSERT(pthread_mutex_init(&stats->mutex, &attr) == 0, "Should init mutex");
+    pthread_mutexattr_destroy(&attr);
     
-    if (stats == MAP_FAILED) {
-        perror("mmap");
-        shm_unlink(SHM_NAME);
-        return -1;
-    }
-    
-    DEBUG_ASSERT(stats != NULL && stats != MAP_FAILED, "Stats mapping should be valid");
-    
-    // Initialize mutex for process-shared use
-    pthread_mutexattr_t mutex_attr;
-    pthread_mutexattr_init(&mutex_attr);
-    // PTHREAD_PROCESS_SHARED allows mutex to work across processes
-    pthread_mutexattr_setpshared(&mutex_attr, PTHREAD_PROCESS_SHARED);
-    
-    int ret = pthread_mutex_init(&stats->mutex, &mutex_attr);
-    DEBUG_ASSERT(ret == 0, "Mutex initialization should succeed");
-    
-    pthread_mutexattr_destroy(&mutex_attr);
-    
-    // Initialize statistics
+    // Initialize stats
+    stats->master_pid = getpid();
     memset(stats->messages_sent, 0, sizeof(stats->messages_sent));
     memset(stats->messages_received, 0, sizeof(stats->messages_received));
-    memset(stats->slave_pids, 0, sizeof(stats->slave_pids));
     memset(stats->active_slaves, 0, sizeof(stats->active_slaves));
-    
-    // Set magic number to verify initialization
     stats->magic = STATS_MAGIC;
-    
-    DEBUG_ASSERT(stats->magic == STATS_MAGIC, "Magic number should be set");
     
     return 0;
 }
 
 static int setup_semaphore(void) {
-    // Create named semaphore for signaling stats updates
-    // Initial value 0 - readers will block until we post
-    stats_ready_sem = sem_open(SEM_NAME, O_CREAT | O_EXCL, 0666, 0);
-    if (stats_ready_sem == SEM_FAILED) {
-        perror("sem_open");
-        return -1;
-    }
-    
-    DEBUG_ASSERT(stats_ready_sem != SEM_FAILED, "Semaphore should be created successfully");
-    
+    sem_unlink(SEM_NAME);
+    stats_sem = sem_open(SEM_NAME, O_CREAT | O_EXCL, 0666, 0);
+    DEBUG_ASSERT(stats_sem != SEM_FAILED, "Should create semaphore");
     return 0;
 }
 
-// === Message Processing ===
 static void handle_register(const message_t *msg) {
-    DEBUG_ASSERT(msg != NULL, "Message should not be NULL");
-    DEBUG_ASSERT(msg->type == MSG_REGISTER, "Message type should be REGISTER");
-    
     int id = msg->slave_id;
-    if (id < 0 || id >= MAX_SLAVES) {
-        DEBUG_ASSERT(0, "Invalid slave_id in register message");
-        return;
-    }
-    
-    DEBUG_ASSERT(msg->payload > 0, "PID in register message should be valid");
+    DEBUG_ASSERT(id >= 0 && id < NUM_SLAVES, "Valid slave ID");
     
     // Close old connection if exists
-    if (slaves[id].fd >= 0) {
-        close(slaves[id].fd);
-        slaves[id].fd = -1;
+    if (slave_fds[id] >= 0) {
+        close(slave_fds[id]);
     }
     
-    // Open slave's FIFO
+    // Open slave FIFO
     char slave_fifo[256];
     snprintf(slave_fifo, sizeof(slave_fifo), "%s%d", SLAVE_FIFO_PREFIX, id);
+    DEBUG_ASSERT(file_exists(slave_fifo), "Slave FIFO should exist");
     
-    // Verify slave FIFO exists
-    DEBUG_ASSERT(file_exists(slave_fifo), "Slave FIFO should exist before opening");
+    slave_fds[id] = open(slave_fifo, O_WRONLY);
+    DEBUG_ASSERT(slave_fds[id] >= 0, "Should open slave FIFO");
     
-    slaves[id].fd = open(slave_fifo, O_WRONLY);
-    if (slaves[id].fd < 0) {
-        perror("open slave FIFO");
-        return;
-    }
-    
-    DEBUG_ASSERT(slaves[id].fd >= 0, "Slave fd should be valid after open");
-    
-    slaves[id].pid = msg->payload;
-    slaves[id].active = 1;
-    
-    // Update shared memory stats
-    DEBUG_ASSERT(stats != NULL, "Stats should be initialized");
-    DEBUG_ASSERT(stats->magic == STATS_MAGIC, "Stats magic should be valid");
-    
-    pthread_mutex_lock(&stats->mutex);  // Lock before modifying shared data
-    stats->slave_pids[id] = msg->payload;
+    // Update stats
+    pthread_mutex_lock(&stats->mutex);
     stats->active_slaves[id] = 1;
-    pthread_mutex_unlock(&stats->mutex);  // Always unlock
+    pthread_mutex_unlock(&stats->mutex);
     
-    printf("Master: Registered slave %d (PID=%d)\n", id, msg->payload);
+#if ENABLE_PRINTING
+    printf("Master: Registered slave %d\n", id);
+#endif
 }
 
 static void handle_unregister(const message_t *msg) {
-    DEBUG_ASSERT(msg != NULL, "Message should not be NULL");
-    DEBUG_ASSERT(msg->type == MSG_UNREGISTER, "Message type should be UNREGISTER");
-    
     int id = msg->slave_id;
-    if (id < 0 || id >= MAX_SLAVES) {
-        DEBUG_ASSERT(0, "Invalid slave_id in unregister message");
-        return;
+    DEBUG_ASSERT(id >= 0 && id < NUM_SLAVES, "Valid slave ID");
+    
+    if (slave_fds[id] >= 0) {
+        close(slave_fds[id]);
+        slave_fds[id] = -1;
     }
-    
-    if (slaves[id].fd >= 0) {
-        close(slaves[id].fd);
-        slaves[id].fd = -1;
-    }
-    
-    slaves[id].active = 0;
-    slaves[id].pid = 0;
-    
-    // Update shared memory stats
-    DEBUG_ASSERT(stats != NULL, "Stats should be initialized");
-    DEBUG_ASSERT(stats->magic == STATS_MAGIC, "Stats magic should be valid");
     
     pthread_mutex_lock(&stats->mutex);
-    stats->slave_pids[id] = 0;
     stats->active_slaves[id] = 0;
     pthread_mutex_unlock(&stats->mutex);
     
+#if ENABLE_PRINTING
     printf("Master: Unregistered slave %d\n", id);
+#endif
 }
 
 static void handle_response(const message_t *msg) {
-    DEBUG_ASSERT(msg != NULL, "Message should not be NULL");
-    DEBUG_ASSERT(msg->type == MSG_RESPONSE, "Message type should be RESPONSE");
-    
     int id = msg->slave_id;
-    if (id < 0 || id >= MAX_SLAVES) {
-        DEBUG_ASSERT(0, "Invalid slave_id in response message");
-        return;
-    }
-    
-    // Verify response is from active slave
-    DEBUG_ASSERT(slaves[id].active, "Response should come from active slave");
-    
-    // Update statistics
-    DEBUG_ASSERT(stats != NULL, "Stats should be initialized");
-    DEBUG_ASSERT(stats->magic == STATS_MAGIC, "Stats magic should be valid");
+    DEBUG_ASSERT(id >= 0 && id < NUM_SLAVES, "Valid slave ID");
     
     pthread_mutex_lock(&stats->mutex);
     stats->messages_received[id]++;
@@ -231,226 +142,144 @@ static void process_message(const message_t *msg) {
             handle_response(msg);
             break;
         default:
-            fprintf(stderr, "Unknown message type: %d\n", msg->type);
+            DEBUG_ASSERT(0, "Unknown message type");
     }
 }
 
-// === Query Management ===
-static void send_queries_to_slaves(int query_value) {
-    DEBUG_ASSERT(query_value > 0, "Query value should be positive");
-    DEBUG_ASSERT(stats != NULL, "Stats should be initialized");
+static void send_queries(void) {
+    static int query_counter = 0;
+    query_counter++;
     
-    int sent_count = 0;
-    
-    for (int i = 0; i < MAX_SLAVES; i++) {
-        if (!slaves[i].active || slaves[i].fd < 0) continue;
-        
-        DEBUG_ASSERT(slaves[i].pid > 0, "Active slave should have valid PID");
+    for (int i = 0; i < NUM_SLAVES; i++) {
+        if (slave_fds[i] < 0) continue;
         
         message_t msg = {
             .type = MSG_QUERY,
             .slave_id = i,
-            .payload = query_value
+            .payload = query_counter
         };
         
-        ssize_t written = write(slaves[i].fd, &msg, sizeof(msg));
-        if (written == sizeof(msg)) {
-            // Update statistics
+        if (write(slave_fds[i], &msg, sizeof(msg)) == sizeof(msg)) {
             pthread_mutex_lock(&stats->mutex);
             stats->messages_sent[i]++;
             pthread_mutex_unlock(&stats->mutex);
-            sent_count++;
         } else {
             // Slave disconnected
-            slaves[i].active = 0;
-            close(slaves[i].fd);
-            slaves[i].fd = -1;
-            
-            // Update shared memory
+            close(slave_fds[i]);
+            slave_fds[i] = -1;
             pthread_mutex_lock(&stats->mutex);
             stats->active_slaves[i] = 0;
-            stats->slave_pids[i] = 0;
             pthread_mutex_unlock(&stats->mutex);
         }
     }
     
-    if (sent_count > 0) {
-        printf("Master: Sent queries to %d slaves (value=%d)\n", 
-               sent_count, query_value);
-    }
+#if ENABLE_PRINTING
+    printf("Master: Sent query %d to active slaves\n", query_counter);
+#endif
 }
 
-// === Stats Handling ===
 static void signal_stats_ready(void) {
-    DEBUG_ASSERT(stats_ready_sem != NULL && stats_ready_sem != SEM_FAILED, 
-                 "Semaphore should be initialized");
+    DEBUG_ASSERT(sem_post(stats_sem) == 0, "Should signal stats ready");
     
-    // Post to semaphore to wake up any waiting readers
-    int ret = sem_post(stats_ready_sem);
-    DEBUG_ASSERT(ret == 0, "Semaphore post should succeed");
-    
+#if ENABLE_PRINTING
     printf("Master: Stats updated in shared memory\n");
+#endif
 }
 
-// === Main Loop ===
-static int master_main_loop(void) {
-    DEBUG_ASSERT(master_fd >= 0, "Master fd should be valid");
-    DEBUG_ASSERT(stats != NULL, "Stats should be initialized");
-    DEBUG_ASSERT(stats->magic == STATS_MAGIC, "Stats magic should be valid");
-    
-    struct pollfd pfd = {
-        .fd = master_fd,
-        .events = POLLIN
-    };
-    
-    int query_counter = 0;
-    struct timeval last_query_time, current_time;
-    gettimeofday(&last_query_time, NULL);
-    
-    while (!should_exit) {
-        // Handle stats dump request
-        if (dump_stats) {
-            dump_stats = 0;
-            signal_stats_ready();
-        }
-        
-        // Poll for incoming messages
-        int ret = poll(&pfd, 1, POLL_TIMEOUT_MS);
-        
-        if (ret < 0) {
-            if (errno == EINTR) continue;
-            perror("poll");
-            return -1;
-        }
-        
-        // Process all available messages
-        if (ret > 0 && (pfd.revents & POLLIN)) {
-            message_t msg;
-            ssize_t bytes;
-            
-            while ((bytes = read(master_fd, &msg, sizeof(msg))) == sizeof(msg)) {
-                DEBUG_ASSERT(msg.type >= MSG_REGISTER && msg.type <= MSG_RESPONSE,
-                           "Message type should be valid");
-                DEBUG_ASSERT(msg.slave_id >= 0 && msg.slave_id < MAX_SLAVES,
-                           "Slave ID in message should be valid");
-                
-                process_message(&msg);
-            }
-            
-            if (bytes < 0 && errno != EAGAIN && errno != EWOULDBLOCK) {
-                perror("read");
-                return -1;
-            }
-        }
-        
-        // Check if it's time to send queries
-        gettimeofday(&current_time, NULL);
-        long elapsed_ms = (current_time.tv_sec - last_query_time.tv_sec) * 1000 +
-                         (current_time.tv_usec - last_query_time.tv_usec) / 1000;
-        
-        if (elapsed_ms >= QUERY_INTERVAL_MS) {
-            send_queries_to_slaves(++query_counter);
-            last_query_time = current_time;
-        }
-    }
-    
-    return 0;
-}
-
-// === Cleanup ===
-static void cleanup_resources(void) {
-    // Close all slave connections
-    for (int i = 0; i < MAX_SLAVES; i++) {
-        if (slaves[i].fd >= 0) {
-            close(slaves[i].fd);
+static void cleanup(void) {
+    // Close slave connections
+    for (int i = 0; i < NUM_SLAVES; i++) {
+        if (slave_fds[i] >= 0) {
+            close(slave_fds[i]);
         }
     }
     
     // Close master FIFO
     if (master_fd >= 0) {
         close(master_fd);
-        master_fd = -1;
     }
     unlink(MASTER_FIFO);
+    unlink(MASTER_PID_FILE);
     
-    // Clean up shared memory
+    // Cleanup shared memory
     if (stats != NULL) {
-        pthread_mutex_destroy(&stats->mutex);  // Destroy mutex before unmapping
+        pthread_mutex_destroy(&stats->mutex);
         munmap(stats, sizeof(stats_t));
-        stats = NULL;
     }
     shm_unlink(SHM_NAME);
     
-    // Clean up semaphore
-    if (stats_ready_sem != NULL) {
-        sem_close(stats_ready_sem);
-        stats_ready_sem = NULL;
+    // Cleanup semaphore
+    if (stats_sem != NULL) {
+        sem_close(stats_sem);
     }
     sem_unlink(SEM_NAME);
 }
 
-// === Main Function ===
 int main(void) {
-    // Initialize slave array
-    memset(slaves, 0, sizeof(slaves));
-    for (int i = 0; i < MAX_SLAVES; i++) {
-        slaves[i].fd = -1;
+    // Initialize slave FDs
+    for (int i = 0; i < NUM_SLAVES; i++) {
+        slave_fds[i] = -1;
     }
     
-    // Set up signal handling
+    // Setup signal handling
     signal(SIGINT, handle_signal);
     signal(SIGTERM, handle_signal);
     signal(SIGUSR1, handle_signal);
     signal(SIGPIPE, SIG_IGN);
     
-    // Register cleanup function
-    atexit(cleanup_resources);
+    atexit(cleanup);
     
-    // Initialize shared memory
-    if (setup_shared_memory() < 0) {
-        return 1;
-    }
+    // Write PID file first
+    write_pid_file();
     
-    DEBUG_ASSERT(stats != NULL, "Stats should be set up");
-    DEBUG_ASSERT(stats->magic == STATS_MAGIC, "Stats should be properly initialized");
-    
-    // Initialize semaphore
-    if (setup_semaphore() < 0) {
-        return 1;
-    }
-    
-    DEBUG_ASSERT(stats_ready_sem != SEM_FAILED, "Semaphore should be set up");
+    // Setup IPC
+    DEBUG_ASSERT(setup_shared_memory() == 0, "Should setup shared memory");
+    DEBUG_ASSERT(setup_semaphore() == 0, "Should setup semaphore");
     
     // Create master FIFO
     unlink(MASTER_FIFO);
-    DEBUG_ASSERT(!file_exists(MASTER_FIFO), "Master FIFO should not exist after unlink");
+    DEBUG_ASSERT(!file_exists(MASTER_FIFO), "No leftover FIFO");
+    DEBUG_ASSERT(mkfifo(MASTER_FIFO, 0666) == 0, "Should create master FIFO");
     
-    if (mkfifo(MASTER_FIFO, 0666) < 0) {
-        perror("mkfifo master");
-        return 1;
-    }
-    
-    DEBUG_ASSERT(file_exists(MASTER_FIFO), "Master FIFO should exist after creation");
-    
-    // Open FIFO for reading (non-blocking)
     master_fd = open(MASTER_FIFO, O_RDONLY | O_NONBLOCK);
-    if (master_fd < 0) {
-        perror("open master FIFO");
-        return 1;
-    }
+    DEBUG_ASSERT(master_fd >= 0, "Should open master FIFO");
     
-    DEBUG_ASSERT(master_fd >= 0, "Master fd should be valid");
-    
+#if ENABLE_PRINTING
     printf("Master: Started (PID=%d)\n", getpid());
     printf("Master: Send SIGUSR1 to display stats\n");
+#endif
     
-    // Run main loop
-    int ret = master_main_loop();
+    // Main loop
+    struct pollfd pfd = { .fd = master_fd, .events = POLLIN };
     
-    printf("Master: Shutting down...\n");
+    while (!should_exit) {
+        // Handle stats request
+        if (stats_requested) {
+            stats_requested = 0;
+            signal_stats_ready();
+        }
+        
+        // Poll for messages
+        int ret = poll(&pfd, 1, POLL_TIMEOUT_MS);
+        
+        if (ret > 0 && (pfd.revents & POLLIN)) {
+            message_t msg;
+            while (read(master_fd, &msg, sizeof(msg)) == sizeof(msg)) {
+                process_message(&msg);
+            }
+        }
+        
+        // Send periodic queries 
+        static int poll_count = 0;
+        if (++poll_count >= (QUERY_INTERVAL_MS / POLL_TIMEOUT_MS)) {
+            send_queries();
+            poll_count = 0;
+        }
+    }
     
-    // Final stats update
-    signal_stats_ready();
+#if ENABLE_PRINTING
+    printf("Master: Shutting down\n");
+#endif
     
-    return ret;
+    return 0;
 }
