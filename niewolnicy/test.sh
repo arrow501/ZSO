@@ -45,9 +45,17 @@ PID=$!
 sleep 0.1  # Let it start
 
 echo "Sending 10 rapid signals..."
-for i in {1..10}; do
-    kill -USR2 $PID
-done
+kill -USR2 $PID #1
+kill -USR2 $PID #2
+kill -USR2 $PID #3
+kill -USR2 $PID #4
+kill -USR2 $PID #5
+kill -USR2 $PID #6
+kill -USR2 $PID #7
+kill -USR2 $PID #8
+kill -USR2 $PID #9
+kill -USR2 $PID #10
+
 
 sleep 1
 kill -TERM $PID 2>/dev/null || true
