@@ -20,7 +20,7 @@ echo
 echo "Test 1: Signal counting (stats should print N times for N signals)"
 echo "----------------------------------------------------------------"
 
-export NUM_MESSAGES_PER_SLAVE=100
+export NUM_MESSAGES_PER_SLAVE=1000
 
 ./main 2 > system.out 2>&1 &
 MAIN_PID=$!
