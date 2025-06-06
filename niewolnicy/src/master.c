@@ -58,7 +58,6 @@ static void setup_shared_memory(void) {
     memset(stats->messages_sent, 0, sizeof(stats->messages_sent));
     memset(stats->messages_received, 0, sizeof(stats->messages_received));
     memset(stats->active_slaves, 0, sizeof(stats->active_slaves));
-    stats->magic = STATS_MAGIC;
 }
 
 static void display_stats(void) {
