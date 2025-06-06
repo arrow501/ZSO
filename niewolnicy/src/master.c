@@ -43,19 +43,33 @@ static int setup_shared_memory(void) {
     shm_unlink(SHM_NAME);
     
     int shm_fd = shm_open(SHM_NAME, O_CREAT | O_RDWR | O_EXCL, 0666);
-    DEBUG_ASSERT(shm_fd >= 0, "Should create shared memory");
+    if (shm_fd < 0) {
+        perror("shm_open");
+        return -1;
+    }
     
-    DEBUG_ASSERT(ftruncate(shm_fd, sizeof(stats_t)) == 0, "Should set shm size");
+    if (ftruncate(shm_fd, sizeof(stats_t)) != 0) {
+        perror("ftruncate");
+        close(shm_fd);
+        return -1;
+    }
     
     stats = mmap(NULL, sizeof(stats_t), PROT_READ | PROT_WRITE, MAP_SHARED, shm_fd, 0);
     close(shm_fd);
-    DEBUG_ASSERT(stats != MAP_FAILED, "Should map shared memory");
+    if (stats == MAP_FAILED) {
+        perror("mmap");
+        return -1;
+    }
     
     // Simple mutex initialization
     pthread_mutexattr_t attr;
     pthread_mutexattr_init(&attr);
     pthread_mutexattr_setpshared(&attr, PTHREAD_PROCESS_SHARED);
-    DEBUG_ASSERT(pthread_mutex_init(&stats->mutex, &attr) == 0, "Should init mutex");
+    if (pthread_mutex_init(&stats->mutex, &attr) != 0) {
+        perror("pthread_mutex_init");
+        pthread_mutexattr_destroy(&attr);
+        return -1;
+    }
     pthread_mutexattr_destroy(&attr);
     
     // Initialize stats
@@ -71,13 +85,19 @@ static int setup_shared_memory(void) {
 static int setup_semaphore(void) {
     sem_unlink(SEM_NAME);
     stats_sem = sem_open(SEM_NAME, O_CREAT | O_EXCL, 0666, 0);
-    DEBUG_ASSERT(stats_sem != SEM_FAILED, "Should create stats semaphore");
+    if (stats_sem == SEM_FAILED) {
+        perror("sem_open");
+        return -1;
+    }
     return 0;
 }
 
 static void handle_register(const message_t *msg) {
     int id = msg->slave_id;
-    DEBUG_ASSERT(id >= 0 && id < MAX_SLAVES, "Valid slave ID");
+    if (id < 0 || id >= MAX_SLAVES) {
+        fprintf(stderr, "Invalid slave ID: %d\n", id);
+        return;
+    }
     
     // Close old connection if exists
     if (slave_fds[id] >= 0) {
@@ -87,10 +107,16 @@ static void handle_register(const message_t *msg) {
     // Open slave FIFO
     char slave_fifo[256];
     snprintf(slave_fifo, sizeof(slave_fifo), "%s%d", SLAVE_FIFO_PREFIX, id);
-    DEBUG_ASSERT(file_exists(slave_fifo), "Slave FIFO should exist");
+    if (!file_exists(slave_fifo)) {
+        fprintf(stderr, "Slave FIFO does not exist: %s\n", slave_fifo);
+        return;
+    }
     
     slave_fds[id] = open(slave_fifo, O_WRONLY);
-    DEBUG_ASSERT(slave_fds[id] >= 0, "Should open slave FIFO");
+    if (slave_fds[id] < 0) {
+        perror("open slave FIFO");
+        return;
+    }
     
     // Update stats
     pthread_mutex_lock(&stats->mutex);
@@ -104,7 +130,10 @@ static void handle_register(const message_t *msg) {
 
 static void handle_unregister(const message_t *msg) {
     int id = msg->slave_id;
-    DEBUG_ASSERT(id >= 0 && id < MAX_SLAVES, "Valid slave ID");
+    if (id < 0 || id >= MAX_SLAVES) {
+        fprintf(stderr, "Invalid slave ID: %d\n", id);
+        return;
+    }
     
     if (slave_fds[id] >= 0) {
         close(slave_fds[id]);
@@ -122,7 +151,10 @@ static void handle_unregister(const message_t *msg) {
 
 static void handle_response(const message_t *msg) {
     int id = msg->slave_id;
-    DEBUG_ASSERT(id >= 0 && id < MAX_SLAVES, "Valid slave ID");
+    if (id < 0 || id >= MAX_SLAVES) {
+        fprintf(stderr, "Invalid slave ID: %d\n", id);
+        return;
+    }
     
     pthread_mutex_lock(&stats->mutex);
     stats->messages_received[id]++;
@@ -141,7 +173,8 @@ static void process_message(const message_t *msg) {
             handle_response(msg);
             break;
         default:
-            DEBUG_ASSERT(0, "Unknown message type");
+            fprintf(stderr, "Unknown message type: %d\n", msg->type);
+            break;
     }
 }
 
@@ -178,7 +211,10 @@ static void send_queries(void) {
 }
 
 static void signal_stats_ready(void) {
-    DEBUG_ASSERT(sem_post(stats_sem) == 0, "Should signal stats ready");
+    if (sem_post(stats_sem) != 0) {
+        perror("sem_post");
+        return;
+    }
     
     // Also display stats directly in master (simplified)
     printf("\n=== Master Statistics ===\n");
@@ -253,17 +289,32 @@ int main(void) {
     // Write PID file first
     write_pid_file();
     
-    // Setup IPC
-    DEBUG_ASSERT(setup_shared_memory() == 0, "Should setup shared memory");
-    DEBUG_ASSERT(setup_semaphore() == 0, "Should setup semaphore");
+    // Setup IPC - ZAWSZE wymagane!
+    if (setup_shared_memory() != 0) {
+        fprintf(stderr, "Failed to setup shared memory\n");
+        exit(1);
+    }
+    if (setup_semaphore() != 0) {
+        fprintf(stderr, "Failed to setup semaphore\n");  
+        exit(1);
+    }
     
     // Create master FIFO
     unlink(MASTER_FIFO);
-    DEBUG_ASSERT(!file_exists(MASTER_FIFO), "No leftover FIFO");
-    DEBUG_ASSERT(mkfifo(MASTER_FIFO, 0666) == 0, "Should create master FIFO");
+    if (file_exists(MASTER_FIFO)) {
+        fprintf(stderr, "Failed to remove old FIFO\n");
+        exit(1);
+    }
+    if (mkfifo(MASTER_FIFO, 0666) != 0) {
+        perror("mkfifo");
+        exit(1);
+    }
     
     master_fd = open(MASTER_FIFO, O_RDONLY | O_NONBLOCK);
-    DEBUG_ASSERT(master_fd >= 0, "Should open master FIFO");
+    if (master_fd < 0) {
+        perror("open master FIFO");
+        exit(1);
+    }
     
 #if ENABLE_PRINTING
     printf("Master: Started (PID=%d)\n", getpid());

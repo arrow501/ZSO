@@ -96,7 +96,10 @@ int main(int argc, char *argv[]) {
     
     // Start master
     master_pid = fork();
-    DEBUG_ASSERT(master_pid >= 0, "Should fork master successfully");
+    if (master_pid < 0) {
+        perror("fork master");
+        return 1;
+    }
     
     if (master_pid == 0) {
         execl("./master", "master", NULL);
@@ -117,7 +120,10 @@ int main(int argc, char *argv[]) {
     // Start slaves
     for (int i = 0; i < num_slaves; i++) {
         slave_pids[i] = fork();
-        DEBUG_ASSERT(slave_pids[i] >= 0, "Should fork slave successfully");
+        if (slave_pids[i] < 0) {
+            perror("fork slave");
+            return 1;
+        }
         
         if (slave_pids[i] == 0) {
             char slave_id_str[16];

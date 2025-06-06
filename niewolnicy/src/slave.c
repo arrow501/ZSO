@@ -24,8 +24,14 @@ static void handle_signal(int sig) {
 }
 
 static int send_to_master(const message_t *msg) {
-    DEBUG_ASSERT(master_fd >= 0, "Master fd should be valid");
-    DEBUG_ASSERT(msg->slave_id == slave_id, "Message should be from this slave");
+    if (master_fd < 0) {
+        fprintf(stderr, "Master fd not valid\n");
+        return -1;
+    }
+    if (msg->slave_id != slave_id) {
+        fprintf(stderr, "Message slave_id mismatch\n");
+        return -1;
+    }
     
     ssize_t written = write(master_fd, msg, sizeof(message_t));
     if (written != sizeof(message_t)) {
@@ -56,8 +62,14 @@ static int unregister_from_master(void) {
 }
 
 static void process_query(const message_t *query) {
-    DEBUG_ASSERT(query->type == MSG_QUERY, "Should be query message");
-    DEBUG_ASSERT(query->slave_id == slave_id, "Query should be for this slave");
+    if (query->type != MSG_QUERY) {
+        fprintf(stderr, "Expected query message\n");
+        return;
+    }
+    if (query->slave_id != slave_id) {
+        fprintf(stderr, "Query not for this slave\n");
+        return;
+    }
     
     // Simple processing: double the value
     message_t response = {
@@ -102,7 +114,10 @@ int main(int argc, char *argv[]) {
     }
     
     slave_id = atoi(argv[1]);
-    DEBUG_ASSERT(slave_id >= 0 && slave_id < MAX_SLAVES, "Valid slave ID");
+    if (slave_id < 0 || slave_id >= MAX_SLAVES) {
+        fprintf(stderr, "Invalid slave ID: %d\n", slave_id);
+        return 1;
+    }
     
     // Setup signal handling
     signal(SIGTERM, handle_signal);
@@ -112,19 +127,34 @@ int main(int argc, char *argv[]) {
     // Create slave FIFO
     snprintf(slave_fifo, sizeof(slave_fifo), "%s%d", SLAVE_FIFO_PREFIX, slave_id);
     unlink(slave_fifo);
-    DEBUG_ASSERT(!file_exists(slave_fifo), "No leftover slave FIFO");
-    DEBUG_ASSERT(mkfifo(slave_fifo, 0666) == 0, "Should create slave FIFO");
+    if (file_exists(slave_fifo)) {
+        fprintf(stderr, "Failed to remove old slave FIFO\n");
+        return 1;
+    }
+    if (mkfifo(slave_fifo, 0666) != 0) {
+        perror("mkfifo");
+        return 1;
+    }
     
     // Connect to master
     master_fd = open(MASTER_FIFO, O_WRONLY);
-    DEBUG_ASSERT(master_fd >= 0, "Should connect to master");
+    if (master_fd < 0) {
+        perror("open master FIFO");
+        return 1;
+    }
     
     // Register with master
-    DEBUG_ASSERT(register_with_master() == 0, "Should register with master");
+    if (register_with_master() != 0) {
+        fprintf(stderr, "Failed to register with master\n");
+        return 1;
+    }
     
     // Open slave FIFO for reading
     slave_fd = open(slave_fifo, O_RDONLY);
-    DEBUG_ASSERT(slave_fd >= 0, "Should open slave FIFO");
+    if (slave_fd < 0) {
+        perror("open slave FIFO");
+        return 1;
+    }
     
 #if ENABLE_PRINTING
     printf("Slave %d: Started (PID=%d)\n", slave_id, getpid());
@@ -154,12 +184,15 @@ int main(int argc, char *argv[]) {
             ssize_t bytes = read(slave_fd, &msg, sizeof(msg));
             
             if (bytes == sizeof(msg)) {
-                DEBUG_ASSERT(msg.slave_id == slave_id, "Message should be for this slave");
+                if (msg.slave_id != slave_id) {
+                    fprintf(stderr, "Message not for this slave\n");
+                    continue;
+                }
                 
                 if (msg.type == MSG_QUERY) {
                     process_query(&msg);
                 } else {
-                    DEBUG_ASSERT(0, "Slave should only receive queries");
+                    fprintf(stderr, "Slave should only receive queries\n");
                 }
             } else if (bytes == 0) {
                 // Master disconnected
