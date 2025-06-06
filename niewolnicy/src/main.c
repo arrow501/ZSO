@@ -98,6 +98,8 @@ int main(int argc, char *argv[]) {
     }
     
     if (master_pid == 0) {
+        // In master child: ignore SIGINT so only main handles it
+        signal(SIGINT, SIG_IGN);
         execl("./master", "master", NULL);
         perror("Failed to exec master");
         exit(1);
@@ -119,6 +121,8 @@ int main(int argc, char *argv[]) {
         }
         
         if (slave_pids[i] == 0) {
+            // In slave child: ignore SIGINT so only main handles it
+            signal(SIGINT, SIG_IGN);
             char slave_id_str[16];
             snprintf(slave_id_str, sizeof(slave_id_str), "%d", i);
             execl("./slave", "slave", slave_id_str, NULL);

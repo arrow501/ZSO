@@ -14,7 +14,7 @@
 
 /** Number of messages each slave should process before exiting */
 #ifndef NUM_MESSAGES_PER_SLAVE
-#define NUM_MESSAGES_PER_SLAVE 50
+#define NUM_MESSAGES_PER_SLAVE 10
 #endif
 
 /** Controls debug output (1 = enabled, 0 = disabled) */

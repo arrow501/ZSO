@@ -218,8 +218,7 @@ int main(void) {
         slave_fds[i] = -1;
     }
     
-    // Setup signals
-    signal(SIGINT, handle_signal);
+    // Setup signals - SIGINT is ignored (set by main before exec)
     signal(SIGTERM, handle_signal);
     signal(SIGQUIT, handle_signal);
     signal(SIGUSR1, handle_signal);
