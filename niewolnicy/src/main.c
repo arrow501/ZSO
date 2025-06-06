@@ -18,12 +18,8 @@ static volatile sig_atomic_t should_exit = 0;
 static void handle_signal(int sig) {
     if (sig == SIGINT || sig == SIGTERM) {
         should_exit = 1;
-    } else if (sig == SIGUSR1) {
-        // Forward signal to master for stats display
-        if (master_pid > 0) {
-            kill(master_pid, SIGUSR1);
-        }
     }
+    // Removed SIGUSR1 forwarding - tests signal master directly
 }
 
 static void cleanup_processes(void) {
@@ -105,7 +101,7 @@ int main(int argc, char *argv[]) {
     
     signal(SIGINT, handle_signal);
     signal(SIGTERM, handle_signal);
-    signal(SIGUSR1, handle_signal);  // Forward SIGUSR1 to master
+    // Removed SIGUSR1 - tests signal master directly
     atexit(cleanup_processes);
     
 #if ENABLE_PRINTING
@@ -159,7 +155,6 @@ int main(int argc, char *argv[]) {
     
 #if ENABLE_PRINTING
     printf("Main: All processes started\n");
-    printf("Main: Send SIGUSR1 to this process (PID=%d) to display stats\n", getpid());
     printf("Main: Press Ctrl+C to stop all processes\n");
 #endif
     
